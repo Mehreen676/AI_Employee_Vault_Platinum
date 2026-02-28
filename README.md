@@ -32,17 +32,39 @@ This is not a demo. This is a production-class distributed system designed for o
 ```
 AI_Employee_Vault_Platinum/
 │
-├── cloud_agent/              # Cloud-side AI reasoning component (HuggingFace)
-│   └── __init__.py           # Module stub — implementation Phase 2
+├── cloud_agent/              # Cloud Agent package — task generation, claim-by-move, daemon mode
+│   ├── agent.py              # CloudAgent v1.4.0 — core implementation
+│   └── task_generator.py     # Standalone task generation utility
 │
-├── local_executor/           # Local machine execution component
-│   └── __init__.py           # Module stub — implementation Phase 2
+├── local_executor/           # Local Executor package — task processing, Dashboard.md writer
+│   ├── executor.py           # LocalExecutor v1.3.0 — core implementation
+│   └── watcher.py            # Polling watcher entrypoint
 │
-├── vault/                    # Shared state store (inter-component communication bus)
-│   ├── Pending_Approval/     # Tasks awaiting human review
-│   ├── Approved/             # Tasks cleared for local execution
-│   ├── Done/                 # Completed tasks with results
-│   └── Logs/                 # Rejected, failed, and system event records
+├── watchers/                 # Input watchers — feed vault/Needs_Action/
+│   ├── gmail_watcher.py      # Platinum Gmail watcher (vault/Needs_Action/email/, stub fallback)
+│   └── gmail_inbox_watcher.py# Gold Tier Gmail watcher (Inbox/ directory)
+│
+├── mcp/                      # MCP tool stubs — email, calendar, social, Odoo, browser
+│   ├── email_mcp_stub.py     # Email send/draft stub
+│   ├── calendar_mcp_stub.py  # Calendar scheduling stub
+│   ├── odoo_mcp_stub.py      # Odoo partner/invoice stub
+│   ├── social_mcp_stub.py    # Social media post stub
+│   ├── router.py             # Tool router — dispatches tasks to the right MCP stub
+│   └── registry.py           # Tool registry — maps task types to MCP handlers
+│
+├── scripts/                  # Operational scripts
+│   ├── generate_evidence_pack.py  # Writes Evidence/JUDGE_PROOF.md
+│   └── run_daily_audit.py         # Daily audit runner
+│
+├── tools/                    # Internal utility tools
+│   ├── generate_architecture_diagram.py
+│   ├── load_demo_task.py
+│   └── mcp_health_report.py
+│
+├── utils/                    # Shared helpers
+│   └── retry.py              # Retry decorator with backoff
+│
+├── prompts/                  # Stored prompt artifacts (processed task prompts)
 │
 ├── specs/                    # Authoritative specification documents
 │   ├── architecture.md       # System architecture — canonical reference
@@ -50,13 +72,34 @@ AI_Employee_Vault_Platinum/
 │   ├── distributed_flow.md   # Step-by-step distributed workflow specification
 │   └── security_model.md     # Threat model, access controls, audit security
 │
+├── logging/                  # Logging subsystem
+│   └── prompt_logger.py      # SHA-256 hash-chained, append-only JSONL prompt logger
+│
 ├── history/                  # Persistent audit record
 │   ├── prompt_log.json       # Append-only JSONL prompt + event log
 │   └── session_notes.md      # Human-readable session records
 │
-├── logging/                  # Logging subsystem
-│   └── prompt_logger.py      # Production-grade prompt logger class
+├── Evidence/                 # Judge-facing output
+│   ├── JUDGE_PROOF.md        # Generated evidence pack (gitignored at runtime)
+│   └── RUN_CHECKLIST.md      # Quick-start command reference
 │
+├── vault/                    # Shared file-system state machine (inter-component bus)
+│   ├── Needs_Action/         # Input queue — Gmail watcher deposits .md files here
+│   │   └── email/            # Email items awaiting Cloud Agent processing
+│   ├── In_Progress/          # Claim-by-move staging (atomic rename = distributed lock)
+│   │   ├── cloud/            # Files currently held by Cloud Agent
+│   │   └── local/            # Files currently held by Local Executor
+│   ├── Pending_Approval/     # Task manifests awaiting executor pickup
+│   ├── Approved/             # Human-approved tasks (Phase 3 gate)
+│   ├── Done/                 # Completed task manifests with results
+│   ├── Logs/                 # execution_log.json, health_log.json
+│   └── Updates/              # cloud_updates.md — Cloud Agent status feed for Dashboard
+│
+├── watchdog.py               # Health Watchdog v1.0.0 — starts and monitors all three processes
+├── cloud_agent.py            # Root entry point — bootstraps and delegates to cloud_agent/agent.py
+├── local_executor.py         # Root entry point — bootstraps and delegates to local_executor/executor.py
+├── odoo_client.py            # Odoo XML-RPC client — partner + draft invoice creation (draft-only)
+├── .gitignore                # Excludes secrets, runtime artifacts, and vault state files
 └── README.md                 # This file
 ```
 
