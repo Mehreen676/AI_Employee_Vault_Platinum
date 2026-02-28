@@ -3,7 +3,18 @@ AI Employee Vault – Platinum Tier
 Local Executor — Core Implementation
 
 Module:   local_executor/executor.py
-Version:  1.2.0
+Version:  1.3.0
+
+Changes in v1.3.0:
+    - Claim-by-move: tasks are now atomically renamed from vault/Pending_Approval/
+      to vault/In_Progress/local/ before processing. This prevents two executor
+      instances from picking up the same file (distributed lock via filesystem).
+      Execution log records now include a "via" field showing the intermediate
+      directory.
+    - Single-writer Dashboard.md: _write_dashboard() is called after each scan
+      batch. Cloud Agent status is read from vault/Updates/cloud_updates.md and
+      merged. No other component may write Dashboard.md.
+    - New vault directories managed: In_Progress/local/ (created on init).
 
 Responsibility:
     Watches vault/Pending_Approval/ for task manifest files.
@@ -11,13 +22,16 @@ Responsibility:
         1. Reads and parses the JSON manifest.
         2. Guards against replay within the current session.
         3. Logs task_execution_started via PromptLogger.
-        4. Mutates manifest: status → "approved", records timestamp.
-        5. Atomically moves manifest to vault/Done/ (write-tmp → rename).
+        4. Atomically claims: renames manifest from Pending_Approval/ to
+           In_Progress/local/ (distributed lock — first rename wins).
+        5. Mutates manifest: status -> "approved", records timestamp.
         6. If task_type == "odoo": calls odoo_client.py to create partner
            and draft invoice; logs result as "success" or "error: <reason>".
-        7. Appends a structured record to vault/Logs/execution_log.json.
-        8. Logs task_completed via PromptLogger.
-        9. Prints a confirmation line to stdout.
+        7. Atomically moves manifest from In_Progress/local/ to Done/.
+        8. Appends a structured record to vault/Logs/execution_log.json.
+        9. Logs task_completed via PromptLogger.
+       10. Writes Dashboard.md (single-writer rule).
+       11. Prints a confirmation line to stdout.
 
     NOTE: In this phase the executor auto-approves tasks from Pending_Approval/
     directly. In Phase 3, a human approval UI will be inserted between
@@ -124,10 +138,10 @@ def _run_odoo_task(content: str) -> str:
            or   "error: <reason>" on any failure.
 
     Failure modes:
-        - odoo_client.py not found          → "error: odoo_client.py not found"
-        - Env vars missing / unconfigured   → "error: odoo tool not configured"
-        - Content format unrecognised       → "error: cannot parse content"
-        - Network / auth / API failure      → "error: <exception message>"
+        - odoo_client.py not found          -> "error: odoo_client.py not found"
+        - Env vars missing / unconfigured   -> "error: odoo tool not configured"
+        - Content format unrecognised       -> "error: cannot parse content"
+        - Network / auth / API failure      -> "error: <exception message>"
     """
     _load_dotenv(_PROJECT_ROOT / ".env")
 
@@ -185,6 +199,14 @@ class LocalExecutor:
     All file transitions use atomic rename — no partially-written files
     are ever observable by other components.
 
+    Claim-by-move (v1.3.0): each manifest is atomically renamed from
+    Pending_Approval/ to In_Progress/local/ before any processing begins.
+    The first executor to rename the file owns it. Other instances skip it.
+
+    Single-writer rule (v1.3.0): Dashboard.md is written exclusively by
+    LocalExecutor._write_dashboard(). Cloud Agent status is sourced from
+    vault/Updates/cloud_updates.md and merged in.
+
     Every action is recorded through PromptLogger and appended to
     history/prompt_log.json.
 
@@ -204,31 +226,40 @@ class LocalExecutor:
     ) -> None:
         vault_root = Path(vault_path) if vault_path else _VAULT_ROOT
 
-        self._pending       = vault_root / "Pending_Approval"
-        self._done          = vault_root / "Done"
-        self._logs          = vault_root / "Logs"
-        self._execution_log = self._logs / "execution_log.json"
+        self._vault_root        = vault_root
+        self._pending           = vault_root / "Pending_Approval"
+        self._in_progress_local = vault_root / "In_Progress" / "local"
+        self._done              = vault_root / "Done"
+        self._logs              = vault_root / "Logs"
+        self._execution_log     = self._logs / "execution_log.json"
+        self._cloud_updates     = vault_root / "Updates" / "cloud_updates.md"
+        self._dashboard         = _PROJECT_ROOT / "Dashboard.md"
 
         self._poll_interval = poll_interval
         self._executor_id   = executor_id or str(uuid.uuid4())
         self._processed: set[str] = set()   # task_id dedup within session
 
         # Ensure vault output directories exist.
-        self._pending.mkdir(parents=True, exist_ok=True)
-        self._done.mkdir(parents=True, exist_ok=True)
-        self._logs.mkdir(parents=True, exist_ok=True)
+        for _dir in [
+            self._pending,
+            self._in_progress_local,
+            self._done,
+            self._logs,
+        ]:
+            _dir.mkdir(parents=True, exist_ok=True)
 
         self._logger = PromptLogger(
             component=Component.LOCAL_EXECUTOR,
-            executor_version="1.2.0",
+            executor_version="1.3.0",
         )
 
         self._logger.log(
             event_type=EventType.SYSTEM_STARTUP,
-            summary="Local Executor initialised",
+            summary="Local Executor initialised (v1.3.0)",
             detail=(
                 f"Executor ID: {self._executor_id} | "
                 f"Watching: {self._pending} | "
+                f"In_Progress/local: {self._in_progress_local} | "
                 f"Poll interval: {self._poll_interval}s"
             ),
             metadata_extra={"executor_id": self._executor_id},
@@ -293,6 +324,9 @@ class LocalExecutor:
                 )
                 print(f"[LocalExecutor] ERROR  {manifest_path.name}: {exc}")
 
+        if processed_count > 0:
+            self._write_dashboard()
+
         return processed_count
 
     def _process(self, manifest_path: Path) -> None:
@@ -300,15 +334,18 @@ class LocalExecutor:
         Process a single task manifest from vault/Pending_Approval/.
 
         Steps:
-            1. Read and parse manifest JSON.
-            2. Replay guard — skip if task_id was already processed this session.
-            3. Log task_execution_started.
-            4. Mutate manifest: status -> "approved", record timestamp.
-            5. Write updated manifest to vault/Done/ via tmp-then-rename.
-            6. Delete original from vault/Pending_Approval/.
-            7. Append entry to vault/Logs/execution_log.json.
-            8. Log task_completed.
-            9. Print confirmation to stdout.
+            1.  Read and parse manifest JSON.
+            2.  Replay guard — skip if task_id was already processed this session.
+            3.  Log task_execution_started.
+            4.  Claim: atomic rename Pending_Approval/<file> -> In_Progress/local/<file>.
+                If rename fails (another executor claimed it), skip silently.
+            5.  Mutate manifest: status -> "approved", record timestamp.
+            6.  Run integration handler (odoo tasks only).
+            7.  Write updated manifest to Done/ via tmp-then-rename.
+            8.  Unlink file from In_Progress/local/.
+            9.  Append entry to vault/Logs/execution_log.json.
+            10. Log task_completed.
+            11. Print confirmation to stdout.
         """
         # --- 1. Read manifest ---
         try:
@@ -343,27 +380,29 @@ class LocalExecutor:
             metadata_extra={"executor_id": self._executor_id},
         )
 
-        # --- 4. Mutate manifest ---
+        # --- 4. Claim by atomic rename: Pending_Approval/ -> In_Progress/local/ ---
+        filename         = manifest_path.name
+        in_progress_path = self._in_progress_local / filename
+
+        try:
+            manifest_path.rename(in_progress_path)
+        except (OSError, FileExistsError):
+            # Another executor claimed it first — skip silently.
+            self._logger.log(
+                event_type=EventType.TASK_FAILED,
+                summary=f"Claim failed (race) — skipping: {filename}",
+                detail=f"Rename {manifest_path} -> {in_progress_path} failed.",
+                task_id=task_id,
+            )
+            return
+
+        # --- 5. Mutate manifest ---
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
         manifest["status"]       = "approved"
         manifest["approved_at"]  = now_iso
         manifest["processed_by"] = self._executor_id
 
-        # --- 5 & 6. Atomic move to Done/ ---
-        filename   = manifest_path.name
-        tmp_path   = self._done / (filename + ".tmp")
-        dest_path  = self._done / filename
-
-        tmp_path.write_text(
-            json.dumps(manifest, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        # Delete source first (required on Windows before rename over an
-        # existing path), then promote tmp to final destination.
-        manifest_path.unlink()
-        tmp_path.rename(dest_path)
-
-        # --- 7. Run integration handler (odoo tasks only) ---
+        # --- 6. Run integration handler (odoo tasks only) ---
         if task_type == "odoo":
             content = manifest.get("content", "")
             odoo_result = _run_odoo_task(content)
@@ -377,7 +416,20 @@ class LocalExecutor:
         else:
             odoo_result = "success"
 
-        # --- 8. Append to execution_log.json ---
+        # --- 7. Write updated manifest to Done/ via tmp-then-rename ---
+        tmp_path  = self._done / (filename + ".tmp")
+        dest_path = self._done / filename
+
+        tmp_path.write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        # --- 8. Unlink In_Progress/local/ copy, promote tmp to Done/ ---
+        in_progress_path.unlink()
+        tmp_path.rename(dest_path)
+
+        # --- 9. Append to execution_log.json ---
         self._append_execution_log(
             task_id=task_id,
             task_type=task_type,
@@ -385,22 +437,23 @@ class LocalExecutor:
             result=odoo_result,
         )
 
-        # --- 9. Log completion ---
+        # --- 10. Log completion ---
         self._logger.log(
             event_type=EventType.TASK_COMPLETED,
             summary=f"Task approved and moved to Done/: [{task_type}]",
-            detail=f"File: {filename} | result={odoo_result}",
+            detail=f"File: {filename} | via=In_Progress/local | result={odoo_result}",
             task_id=task_id,
             metadata_extra={
                 "executor_id": self._executor_id,
-                "dest_file": filename,
-                "from": "Pending_Approval",
-                "to": "Done",
-                "result": odoo_result,
+                "dest_file":   filename,
+                "from":        "Pending_Approval",
+                "via":         "In_Progress/local",
+                "to":          "Done",
+                "result":      odoo_result,
             },
         )
 
-        # --- 10. Mark processed and confirm ---
+        # --- 11. Mark processed and confirm ---
         self._processed.add(task_id)
         _print_task_line(task_type, task_id, filename, odoo_result)
 
@@ -421,13 +474,14 @@ class LocalExecutor:
         File is JSONL — one object per line. Append-only; never re-opened
         for overwrite. fsync guarantees the write survives a process crash.
 
-        Record format:
+        Record format (v1.3.0):
             {
                 "id":        "<task uuid>",
                 "task_type": "<string>",
                 "action":    "approved_and_moved",
                 "timestamp": "<ISO-8601 UTC>",
                 "from":      "Pending_Approval",
+                "via":       "In_Progress/local",
                 "to":        "Done",
                 "result":    "success" | "error: <reason>"
             }
@@ -438,6 +492,7 @@ class LocalExecutor:
             "action":    "approved_and_moved",
             "timestamp": timestamp,
             "from":      "Pending_Approval",
+            "via":       "In_Progress/local",
             "to":        "Done",
             "result":    result,
         }
@@ -445,6 +500,109 @@ class LocalExecutor:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
             fh.flush()
             os.fsync(fh.fileno())
+
+    # ------------------------------------------------------------------
+    # Dashboard writer (single-writer rule)
+    # ------------------------------------------------------------------
+
+    def _write_dashboard(self) -> None:
+        """
+        Write Dashboard.md to the project root.
+
+        Single-writer rule: ONLY LocalExecutor._write_dashboard() may write
+        this file. Cloud Agent status is sourced from vault/Updates/cloud_updates.md
+        and merged here — the Cloud Agent never touches Dashboard.md directly.
+
+        Dashboard sections:
+            - Header with last-updated timestamp and executor ID
+            - Vault state table (counts per directory)
+            - Recent Executions (last 5 from execution_log.json)
+            - Cloud Agent Updates (last 20 lines from cloud_updates.md)
+        """
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # --- Count vault state ---
+        pending_count = len(list(self._pending.glob("*.json")))
+        done_count    = len(list(self._done.glob("*.json")))
+        in_prog_local = len(list(self._in_progress_local.glob("*.json")))
+
+        in_prog_cloud_dir = self._vault_root / "In_Progress" / "cloud"
+        in_prog_cloud = (
+            len(list(in_prog_cloud_dir.glob("*")))
+            if in_prog_cloud_dir.exists() else 0
+        )
+        needs_action_dir = self._vault_root / "Needs_Action"
+        needs_action = (
+            len([f for f in needs_action_dir.rglob("*") if f.is_file()])
+            if needs_action_dir.exists() else 0
+        )
+
+        # --- Read last 5 execution log entries ---
+        exec_entries: list[dict] = []
+        if self._execution_log.exists():
+            lines = self._execution_log.read_text(encoding="utf-8").strip().splitlines()
+            for line in lines[-5:]:
+                try:
+                    exec_entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+
+        # --- Compose dashboard ---
+        lines_out = [
+            "# AI Employee Vault - Dashboard",
+            "",
+            f"**Last updated:** {now}",
+            f"**Writer:** Local Executor `{self._executor_id[:16]}...` (single-writer rule enforced)",
+            f"**Version:** executor v1.3.0",
+            "",
+            "---",
+            "",
+            "## Vault State",
+            "",
+            "| Directory | File Count |",
+            "|---|---|",
+            f"| `vault/Needs_Action/` | {needs_action} |",
+            f"| `vault/In_Progress/cloud/` | {in_prog_cloud} |",
+            f"| `vault/In_Progress/local/` | {in_prog_local} |",
+            f"| `vault/Pending_Approval/` | {pending_count} |",
+            f"| `vault/Done/` | {done_count} |",
+            "",
+            "---",
+            "",
+            "## Recent Executions",
+            "",
+        ]
+
+        if exec_entries:
+            for entry in exec_entries:
+                ts      = entry.get("timestamp", "?")[:19] + "Z"
+                tt      = entry.get("task_type", "?")
+                tid     = entry.get("id", "?")[:8]
+                result  = entry.get("result", "?")
+                lines_out.append(
+                    f"- `{ts}`  [{tt}]  id={tid}...  result={result}"
+                )
+        else:
+            lines_out.append("_No executions recorded yet._")
+
+        # --- Merge Cloud Agent updates ---
+        if self._cloud_updates.exists():
+            cloud_content = self._cloud_updates.read_text(encoding="utf-8").strip()
+            last_lines = "\n".join(cloud_content.splitlines()[-20:])
+            lines_out += [
+                "",
+                "---",
+                "",
+                "## Cloud Agent Updates",
+                "",
+                last_lines,
+                "",
+            ]
+
+        self._dashboard.write_text(
+            "\n".join(lines_out) + "\n",
+            encoding="utf-8",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -461,13 +619,15 @@ def _print_banner(
     print()
     print("=" * 64)
     print("  AI Employee Vault - Platinum Tier")
-    print("  Local Executor - Active")
+    print("  Local Executor v1.3.0 - Active")
     print("=" * 64)
     print(f"  Executor ID  : {executor_id[:16]}...")
     print(f"  Watching     : {pending}")
+    print(f"  Claim into   : {pending.parent / 'In_Progress' / 'local'}")
     print(f"  Poll interval: {poll_interval}s")
     print(f"  Done dir     : {pending.parent / 'Done'}")
     print(f"  Exec log     : {execution_log}")
+    print(f"  Dashboard    : Dashboard.md (single-writer)")
     print("=" * 64)
     print("  Waiting for tasks... (CTRL+C to stop)")
     print()
@@ -490,8 +650,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="local_executor.executor",
         description=(
-            "AI Employee Vault - Platinum Tier: Local Executor.\n"
-            "Watches vault/Pending_Approval/ and processes task manifests."
+            "AI Employee Vault - Platinum Tier: Local Executor v1.3.0.\n"
+            "Watches vault/Pending_Approval/ and processes task manifests.\n"
+            "Claims via In_Progress/local/. Writes Dashboard.md (single-writer)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

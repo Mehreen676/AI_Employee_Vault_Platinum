@@ -33,6 +33,10 @@ for _dir in [
     "vault/Approved",
     "vault/Done",
     "vault/Logs",
+    "vault/Needs_Action/email",
+    "vault/In_Progress/cloud",
+    "vault/In_Progress/local",
+    "vault/Updates",
     "history",
     "logging",
 ]:

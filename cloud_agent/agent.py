@@ -3,7 +3,21 @@ AI Employee Vault – Platinum Tier
 Cloud Agent — Core Implementation
 
 Module:   cloud_agent/agent.py
-Version:  1.3.0
+Version:  1.4.0
+
+Changes in v1.4.0:
+    - Claim-by-move: every cycle the daemon FIRST scans vault/Needs_Action/
+      for queued items (e.g. from the Gmail watcher). Each file is claimed by
+      atomic rename into vault/In_Progress/cloud/ before processing. This
+      prevents race conditions when multiple workers are present.
+    - Single-writer rule: Cloud Agent NEVER writes Dashboard.md. Instead it
+      appends status updates to vault/Updates/cloud_updates.md. Local Executor
+      owns Dashboard.md exclusively.
+    - Enhanced heartbeat: HEALTH_CHECK events now include alive=True,
+      task_count (cumulative tasks submitted this session), and pending_count
+      (current count of .json files in vault/Pending_Approval/).
+    - New vault directories managed: Needs_Action/email/, In_Progress/cloud/,
+      Updates/. All are created on first access.
 
 Responsibility:
     Accepts task specifications and writes structured task manifests to
@@ -80,7 +94,7 @@ EventType    = _pl_mod.EventType
 Component    = _pl_mod.Component
 
 # ---------------------------------------------------------------------------
-# Vault paths
+# Vault paths (module-level constants used by console helpers)
 # ---------------------------------------------------------------------------
 
 _VAULT_ROOT    = _PROJECT_ROOT / "vault"
@@ -154,6 +168,10 @@ class CloudAgent:
     This class does NOT execute tasks. Execution is the exclusive domain
     of local_executor.executor.LocalExecutor.
 
+    Single-writer rule: this class never writes Dashboard.md.
+    Cloud Agent status updates are written to vault/Updates/cloud_updates.md
+    and merged into Dashboard.md by Local Executor exclusively.
+
     Args:
         vault_path: Optional override for the vault root directory.
                     Defaults to <project_root>/vault.
@@ -162,16 +180,33 @@ class CloudAgent:
     def __init__(self, vault_path: Optional[Path] = None) -> None:
         vault_root = Path(vault_path) if vault_path else _VAULT_ROOT
 
-        # Ensure vault directories exist before anything else.
-        self._pending = vault_root / "Pending_Approval"
-        self._pending.mkdir(parents=True, exist_ok=True)
+        # Core vault paths
+        self._pending           = vault_root / "Pending_Approval"
+        self._needs_action      = vault_root / "Needs_Action"
+        self._in_progress_cloud = vault_root / "In_Progress" / "cloud"
+        self._updates           = vault_root / "Updates"
+        self._updates_file      = self._updates / "cloud_updates.md"
+
+        # Ensure all vault directories exist before anything else.
+        for _dir in [
+            self._pending,
+            self._needs_action / "email",
+            self._in_progress_cloud,
+            self._updates,
+        ]:
+            _dir.mkdir(parents=True, exist_ok=True)
 
         self._logger = PromptLogger(component=Component.CLOUD_AGENT)
 
         self._logger.log(
             event_type=EventType.SYSTEM_STARTUP,
-            summary="Cloud Agent initialised",
-            detail=f"Vault Pending_Approval: {self._pending}",
+            summary="Cloud Agent initialised (v1.4.0)",
+            detail=(
+                f"Vault Pending_Approval: {self._pending} | "
+                f"Needs_Action: {self._needs_action} | "
+                f"In_Progress/cloud: {self._in_progress_cloud} | "
+                f"Updates: {self._updates}"
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -183,9 +218,9 @@ class CloudAgent:
         Select a (zone, content, effective_task_type) triple for one task submission.
 
         Special handling:
-            task_type == "odoo"  → zone="finance", task_type="odoo", Odoo AED content.
-            task_type in _ZONES  → zone=task_type, task_type=zone, zone catalogue content.
-            task_type is None    → random zone, task_type=zone, zone catalogue content.
+            task_type == "odoo"  -> zone="finance", task_type="odoo", Odoo AED content.
+            task_type in _ZONES  -> zone=task_type, task_type=zone, zone catalogue content.
+            task_type is None    -> random zone, task_type=zone, zone catalogue content.
 
         Returns:
             (zone, content, effective_task_type) — all strings.
@@ -209,8 +244,135 @@ class CloudAgent:
             if not final_path.exists():
                 return task_id, final_path
         # Extremely unlikely; last resort
-        task_id    = str(uuid.uuid4())
+        task_id = str(uuid.uuid4())
         return task_id, self._pending / f"task_{task_id}.json"
+
+    def _claim_from_needs_action(self) -> Optional[Path]:
+        """
+        Claim one file from vault/Needs_Action/ using atomic rename (claim-by-move).
+
+        Scans all subdirectories of Needs_Action/ for .md and .json files.
+        The first file successfully renamed to In_Progress/cloud/ is claimed.
+        All others are left untouched for the next cycle.
+
+        Returns:
+            Path to the claimed file in In_Progress/cloud/, or None if nothing
+            was available.
+        """
+        candidates = (
+            list(self._needs_action.rglob("*.md")) +
+            list(self._needs_action.rglob("*.json"))
+        )
+        for candidate in sorted(candidates):
+            dest = self._in_progress_cloud / candidate.name
+            if dest.exists():
+                continue
+            try:
+                candidate.rename(dest)
+                self._logger.log(
+                    event_type=EventType.TASK_SUBMITTED,
+                    summary=f"Claimed file from Needs_Action/: {candidate.name}",
+                    detail=f"src={candidate} -> dest={dest}",
+                    metadata_extra={"claim_by_move": True, "file": candidate.name},
+                )
+                return dest
+            except (OSError, FileExistsError):
+                continue
+        return None
+
+    def _process_claimed_file(self, claimed_path: Path) -> Optional[str]:
+        """
+        Process a file claimed from Needs_Action/ (now in In_Progress/cloud/).
+
+        Reads the file, parses YAML frontmatter if present (.md files written
+        by Gmail watcher), extracts metadata (type, from, subject), then
+        submits one task manifest to vault/Pending_Approval/.
+
+        Returns:
+            task_id string on success, None on failure.
+        """
+        try:
+            raw = claimed_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            self._logger.log(
+                event_type=EventType.TASK_FAILED,
+                summary=f"Cannot read claimed file: {claimed_path.name}",
+                detail=str(exc),
+            )
+            return None
+
+        # Parse YAML frontmatter (format: ---\nkey: value\n---\nbody)
+        metadata: dict[str, str] = {}
+        content_body = raw
+        if raw.startswith("---"):
+            parts = raw.split("---", 2)
+            if len(parts) >= 3:
+                for line in parts[1].splitlines():
+                    if ":" in line:
+                        k, _, v = line.partition(":")
+                        metadata[k.strip()] = v.strip().strip('"')
+                content_body = parts[2].strip()
+
+        task_type = metadata.get("type", "email")
+        zone      = task_type if task_type in _ZONES else "email"
+        subject   = metadata.get("subject", claimed_path.stem)
+        sender    = metadata.get("from", "unknown")
+
+        content = (
+            f"[Claimed from Needs_Action] "
+            f"From: {sender} | "
+            f"Subject: {subject}\n"
+            f"{content_body[:500]}"
+        )
+
+        task_id = self.submit_task(task_type=task_type, content=content, zone=zone)
+
+        self._logger.log(
+            event_type=EventType.TASK_SUBMITTED,
+            summary=f"Claimed task submitted to Pending_Approval/: [{task_type}]",
+            detail=(
+                f"Source file: {claimed_path.name} | "
+                f"task_id={task_id} | "
+                f"zone={zone}"
+            ),
+            task_id=task_id,
+            metadata_extra={
+                "source": "needs_action_claimed",
+                "file": claimed_path.name,
+                "zone": zone,
+            },
+        )
+        return task_id
+
+    def _write_cloud_updates(
+        self,
+        cycle: int,
+        task_count: int,
+        last_task_type: Optional[str],
+        last_task_id: Optional[str],
+    ) -> None:
+        """
+        Append one status block to vault/Updates/cloud_updates.md.
+
+        Single-writer rule: Cloud Agent ONLY writes this file, never Dashboard.md.
+        Local Executor reads cloud_updates.md and merges it into Dashboard.md.
+        """
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        pending_count = len(list(self._pending.glob("task_*.json")))
+
+        lines = [
+            f"",
+            f"## Cloud Agent Update — {now}",
+            f"- Cycle: {cycle} | Tasks submitted (session): {task_count} "
+            f"| Pending in vault: {pending_count}",
+        ]
+        if last_task_type and last_task_id:
+            lines.append(
+                f"- Last task: [{last_task_type}] id={last_task_id[:8]}..."
+            )
+
+        with self._updates_file.open("a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
 
     # ------------------------------------------------------------------
     # Public API
@@ -297,8 +459,11 @@ class CloudAgent:
         """
         Continuously generate tasks at a fixed interval (no heartbeat).
 
-        Each cycle picks a zone (random or pinned via task_type) and submits
-        one task. Blocks until CTRL+C.
+        Each cycle:
+            1. Try to claim one file from vault/Needs_Action/ and submit it.
+            2. If no Needs_Action files, generate a new task from the catalogue.
+
+        Blocks until CTRL+C.
 
         Args:
             interval:  Seconds between submissions. Default: 10.
@@ -306,11 +471,13 @@ class CloudAgent:
         """
         _print_banner("auto", interval, task_type)
 
-        task_count = 0
+        task_count    = 0
+        last_type: Optional[str] = None
+        last_id:   Optional[str] = None
 
         self._logger.log(
             event_type=EventType.SYSTEM_STARTUP,
-            summary="Cloud Agent auto mode started",
+            summary="Cloud Agent auto mode started (v1.4.0)",
             detail=(
                 f"Interval: {interval}s | "
                 f"Zone filter: {task_type or 'random'} | "
@@ -321,14 +488,28 @@ class CloudAgent:
 
         try:
             while True:
-                zone, content, tt = self._pick_task(task_type)
-                task_id = self.submit_task(
-                    task_type=tt,
-                    content=content,
-                    zone=zone,
-                )
-                task_count += 1
-                _print_task_line(task_count, tt, task_id)
+                # First: try to claim from Needs_Action (claim-by-move)
+                claimed = self._claim_from_needs_action()
+                if claimed:
+                    task_id = self._process_claimed_file(claimed)
+                    if task_id:
+                        task_count += 1
+                        last_type = "email"
+                        last_id   = task_id
+                        _print_task_line(task_count, "email (claimed)", task_id)
+                else:
+                    # Generate a new task from the catalogue
+                    zone, content, tt = self._pick_task(task_type)
+                    task_id = self.submit_task(
+                        task_type=tt,
+                        content=content,
+                        zone=zone,
+                    )
+                    task_count += 1
+                    last_type = tt
+                    last_id   = task_id
+                    _print_task_line(task_count, tt, task_id)
+
                 time.sleep(interval)
 
         except KeyboardInterrupt:
@@ -348,8 +529,11 @@ class CloudAgent:
         Always-on daemon mode (24/7 style).
 
         Every cycle:
-            1. Emits a HEALTH_CHECK heartbeat log entry with UTC timestamp.
-            2. If auto=True, also submits one task (zone-routed).
+            1. Emits a HEALTH_CHECK heartbeat log entry with alive, task_count,
+               and pending_count fields for watchdog monitoring.
+            2. Tries to claim one file from vault/Needs_Action/ (claim-by-move).
+            3. If auto=True and no Needs_Action file, generates a new task.
+            4. Appends a status update to vault/Updates/cloud_updates.md.
 
         Blocks until CTRL+C.
 
@@ -362,10 +546,12 @@ class CloudAgent:
 
         cycle_count = 0
         task_count  = 0
+        last_type: Optional[str] = None
+        last_id:   Optional[str] = None
 
         self._logger.log(
             event_type=EventType.SYSTEM_STARTUP,
-            summary="Cloud Agent daemon started",
+            summary="Cloud Agent daemon started (v1.4.0)",
             detail=(
                 f"Interval: {interval}s | "
                 f"auto={auto} | "
@@ -381,24 +567,44 @@ class CloudAgent:
 
         try:
             while True:
-                cycle_count += 1
-                now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+                cycle_count  += 1
+                now           = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+                pending_count = len(list(self._pending.glob("task_*.json")))
 
-                # --- Heartbeat ---
+                # --- Enhanced heartbeat (v1.4.0) ---
                 self._logger.log(
                     event_type=EventType.HEALTH_CHECK,
                     summary=f"Daemon heartbeat #{cycle_count}",
-                    detail=f"timestamp={now} | auto={auto} | interval={interval}s",
+                    detail=(
+                        f"timestamp={now} | "
+                        f"auto={auto} | "
+                        f"interval={interval}s | "
+                        f"task_count={task_count} | "
+                        f"pending_count={pending_count}"
+                    ),
                     metadata_extra={
-                        "cycle":     cycle_count,
-                        "timestamp": now,
-                        "auto":      auto,
+                        "cycle":         cycle_count,
+                        "timestamp":     now,
+                        "auto":          auto,
+                        "alive":         True,
+                        "task_count":    task_count,
+                        "pending_count": pending_count,
                     },
                 )
-                _print_heartbeat(cycle_count, now)
+                _print_heartbeat(cycle_count, now, task_count, pending_count)
 
-                # --- Optional task generation ---
-                if auto:
+                # --- Claim from Needs_Action first (claim-by-move) ---
+                claimed = self._claim_from_needs_action()
+                if claimed:
+                    task_id = self._process_claimed_file(claimed)
+                    if task_id:
+                        task_count += 1
+                        last_type   = "email"
+                        last_id     = task_id
+                        _print_task_line(task_count, "email (claimed)", task_id)
+
+                # --- Optional task generation from catalogue ---
+                elif auto:
                     zone, content, tt = self._pick_task(task_type)
                     task_id = self.submit_task(
                         task_type=tt,
@@ -406,7 +612,17 @@ class CloudAgent:
                         zone=zone,
                     )
                     task_count += 1
+                    last_type   = tt
+                    last_id     = task_id
                     _print_task_line(task_count, tt, task_id)
+
+                # --- Cloud status update (single-writer rule: NOT Dashboard.md) ---
+                self._write_cloud_updates(
+                    cycle=cycle_count,
+                    task_count=task_count,
+                    last_task_type=last_type,
+                    last_task_id=last_id,
+                )
 
                 time.sleep(interval)
 
@@ -459,7 +675,7 @@ def _print_banner(
     print()
     print("=" * 66)
     print("  AI Employee Vault - Platinum Tier")
-    print(f"  Cloud Agent - {'Daemon (always-on)' if mode == 'daemon' else 'Auto Task Generator'}")
+    print(f"  Cloud Agent v1.4.0 - {'Daemon (always-on)' if mode == 'daemon' else 'Auto Task Generator'}")
     print("=" * 66)
     print(f"  Mode         : {mode}")
     if mode == "daemon":
@@ -467,20 +683,31 @@ def _print_banner(
     print(f"  Interval     : {interval}s")
     print(f"  Zone filter  : {zone_label}")
     print(f"  Zones        : {', '.join(_ZONES)}")
+    print(f"  Needs_Action : vault/Needs_Action/ (claim-by-move)")
+    print(f"  In_Progress  : vault/In_Progress/cloud/")
     print(f"  Destination  : vault/Pending_Approval/task_<uuid>.json")
+    print(f"  Updates      : vault/Updates/cloud_updates.md")
     print(f"  Logging      : history/prompt_log.json")
     print("=" * 66)
     print("  Press CTRL+C to stop.")
     print()
 
 
-def _print_heartbeat(cycle: int, timestamp: str) -> None:
-    print(f"  [HB #{cycle:04d}] {timestamp}  heartbeat")
+def _print_heartbeat(
+    cycle: int,
+    timestamp: str,
+    task_count: int,
+    pending_count: int,
+) -> None:
+    print(
+        f"  [HB #{cycle:04d}] {timestamp[:19]}Z  "
+        f"alive=True  tasks={task_count}  pending={pending_count}"
+    )
 
 
 def _print_task_line(count: int, zone: str, task_id: str) -> None:
     ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
-    print(f"  [TASK {count:04d}] {ts}  zone={zone:<12}  id={task_id[:8]}...")
+    print(f"  [TASK {count:04d}] {ts}  zone={zone:<20}  id={task_id[:8]}...")
 
 
 # ---------------------------------------------------------------------------
@@ -491,8 +718,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="cloud_agent.agent",
         description=(
-            "AI Employee Vault - Platinum Tier: Cloud Agent.\n"
-            "Generates task manifests in vault/Pending_Approval/.\n\n"
+            "AI Employee Vault - Platinum Tier: Cloud Agent v1.4.0.\n"
+            "Generates task manifests in vault/Pending_Approval/.\n"
+            "Claims items from vault/Needs_Action/ (claim-by-move).\n\n"
             "Modes:\n"
             "  --auto            continuous task generation\n"
             "  --daemon          always-on heartbeat loop\n"

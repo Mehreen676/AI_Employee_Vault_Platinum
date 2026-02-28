@@ -1,6 +1,13 @@
 # AI Employee Vault – Platinum Tier
 
-**Version:** 1.0.0
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Status](https://img.shields.io/badge/status-active-brightgreen)
+![Tier](https://img.shields.io/badge/tier-Platinum-gold)
+![AI](https://img.shields.io/badge/AI-Claude%204.6-purple)
+![Odoo](https://img.shields.io/badge/ERP-Odoo%2016%2F17-blueviolet)
+![License](https://img.shields.io/badge/license-Enterprise-red)
+
+**Version:** 1.4.0
 **Tier:** Platinum (Enterprise Distributed)
 **Status:** Active Development — Foundation Phase Complete
 **Classification:** Enterprise Internal
@@ -395,3 +402,203 @@ cat Evidence/JUDGE_PROOF.md
 The file contains: UTC timestamp, pending/done task counts, last 5 execution
 log entries, last 5 prompt history entries, and an integrity statement
 referencing the SHA-256 hash chain in `history/prompt_log.json`.
+
+---
+
+## Odoo Cloud Deployment
+
+### Infrastructure Overview
+
+| Component | Spec |
+|---|---|
+| **VM** | Ubuntu 22.04 LTS — minimum 4 vCPU / 8 GB RAM |
+| **Odoo** | v16 or v17 Community / Enterprise, running as systemd service |
+| **Nginx** | Reverse proxy with SSL termination via Let's Encrypt |
+| **MCP Integration** | `odoo_client.py` — XML-RPC API, no custom Odoo module required |
+
+### Environment Configuration
+
+All Odoo connection parameters are provided via `.env` (never committed to git):
+
+```env
+ODOO_URL=https://your-odoo-instance.com
+ODOO_DB=your_database_name
+ODOO_USER=admin@example.com
+ODOO_PASSWORD=your_api_key_or_password
+```
+
+### Health Check
+
+```bash
+curl -f https://your-odoo-instance.com/web/health || echo "Odoo DOWN"
+```
+
+### Auto-Start via systemd
+
+```ini
+# /etc/systemd/system/ai-vault.service
+[Unit]
+Description=AI Employee Vault Platinum Tier
+After=network.target
+
+[Service]
+User=vault
+WorkingDirectory=/opt/AI_Employee_Vault_Platinum
+ExecStart=/usr/bin/python3 watchdog.py --start-all --interval 10
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable ai-vault && sudo systemctl start ai-vault
+```
+
+### Draft-Only Rule
+
+`odoo_client.py` **only** creates partners and draft invoices (`state='draft'`).
+No invoice is confirmed or posted. No payment is initiated.
+All financial operations require human review and manual confirmation in Odoo.
+
+### MCP Protocol
+
+The Local Executor calls `odoo_client.py` as an internal tool loaded via
+`importlib.util`, passing structured parameters parsed from the task manifest
+`content` field. No network calls from Cloud Agent to Odoo — all Odoo
+operations are Local Executor–only, enforcing the separation-of-privilege rule.
+
+---
+
+## ✅ Platinum Demo Flow
+
+Complete end-to-end Platinum Tier demonstration in nine steps.
+All commands run from the project root.
+
+---
+
+**Step 1 — Start the Watchdog (single entry point — manages all three processes)**
+
+```bash
+python watchdog.py --start-all --interval 10
+```
+
+The Watchdog starts `cloud_agent.py`, `watchers/gmail_watcher.py`, and
+`local_executor.py` as subprocesses, monitors liveness every 10 seconds,
+auto-restarts any that exit, and writes `vault/Logs/health_log.json`.
+
+---
+
+**Step 2 — Or start processes individually in separate terminals**
+
+Terminal 1 — Gmail Watcher (feeds `vault/Needs_Action/email/`):
+
+```bash
+python -m watchers.gmail_watcher --daemon --interval 30
+```
+
+Falls back to stub mode automatically if `credentials.json` is absent.
+
+Terminal 2 — Cloud Agent (daemon + auto, claim-by-move + task generation):
+
+```bash
+python cloud_agent.py --daemon --auto --interval 5
+```
+
+Terminal 3 — Local Executor (claim-by-move, processes to Done/, writes Dashboard.md):
+
+```bash
+python local_executor.py --poll 2
+```
+
+---
+
+**Step 3 — Observe claim-by-move in action**
+
+```bash
+ls vault/Needs_Action/email/      # .md files from Gmail Watcher
+ls vault/In_Progress/cloud/       # files claimed by Cloud Agent
+ls vault/In_Progress/local/       # files claimed by Local Executor
+ls vault/Pending_Approval/        # task manifests awaiting executor
+ls vault/Done/                    # completed task manifests
+```
+
+Each file transition is an atomic `rename()` — no partial state is visible.
+
+---
+
+**Step 4 — Check the live Dashboard (single-writer)**
+
+```bash
+cat Dashboard.md
+```
+
+Dashboard.md is written exclusively by Local Executor after each task batch.
+Cloud Agent status is sourced from `vault/Updates/cloud_updates.md` and merged in.
+
+---
+
+**Step 5 — View Cloud Agent status updates**
+
+```bash
+cat vault/Updates/cloud_updates.md
+```
+
+Cloud Agent appends one status block per daemon cycle — never writes Dashboard.md directly.
+
+---
+
+**Step 6 — Run an Odoo task specifically**
+
+```bash
+python cloud_agent.py --auto --interval 5 --task-type odoo
+```
+
+Requires `ODOO_*` environment variables in `.env`. Degrades gracefully if unconfigured —
+Odoo tasks still move through the full vault pipeline; `result` field shows `"error: odoo tool not configured"`.
+
+---
+
+**Step 7 — View execution log (JSONL)**
+
+```bash
+cat vault/Logs/execution_log.json
+```
+
+Each record shows `from`, `via`, and `to` directories — the full claim-by-move trace:
+
+```json
+{"id": "...", "task_type": "email", "action": "approved_and_moved",
+ "timestamp": "...", "from": "Pending_Approval", "via": "In_Progress/local",
+ "to": "Done", "result": "success"}
+```
+
+---
+
+**Step 8 — View Watchdog health log (JSONL)**
+
+```bash
+cat vault/Logs/health_log.json
+```
+
+Each record shows per-process `alive`, `pid`, and `restarts` fields:
+
+```json
+{"timestamp": "...", "cycle": 4,
+ "cloud_agent": {"alive": true, "pid": 1234, "restarts": 0},
+ "gmail_watcher": {"alive": true, "pid": 1235, "restarts": 0},
+ "local_executor": {"alive": true, "pid": 1236, "restarts": 0}}
+```
+
+---
+
+**Step 9 — Generate Evidence Pack**
+
+```bash
+python scripts/generate_evidence_pack.py --n 20
+cat Evidence/JUDGE_PROOF.md
+```
+
+Reads live vault state and the last 20 prompt log entries, then writes a
+single judge-ready markdown file containing the full audit trail.

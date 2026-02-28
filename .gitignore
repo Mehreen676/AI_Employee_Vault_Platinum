@@ -14,8 +14,12 @@ venv/
 vault/Logs/*.json
 vault/Done/*.json
 vault/Pending_Approval/*.json
+vault/In_Progress/**
+vault/Needs_Action/**
+vault/Updates/**
 history/*.json
 Evidence/JUDGE_PROOF.md
+Dashboard.md
 
 # Claude IDE settings
 .claude/
