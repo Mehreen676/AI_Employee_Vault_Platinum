@@ -47,10 +47,23 @@ from pathlib import Path
 from typing import Optional
 
 # ---------------------------------------------------------------------------
-# Bootstrap prompt_logger via direct file load.
+# Ensure project root is on sys.path so utils.* imports resolve.
 # ---------------------------------------------------------------------------
 
 _PROJECT_ROOT = Path(__file__).parent.parent
+if str(_PROJECT_ROOT) not in _sys.path:
+    _sys.path.insert(0, str(_PROJECT_ROOT))
+
+import os as _os
+
+from utils.retry import with_retry          # noqa: E402
+from utils.rate_limiter import get_limiter  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# DRY_RUN — global env flag.
+# When DRY_RUN=true the watcher logs intent but does NOT write .md files.
+# ---------------------------------------------------------------------------
+_DRY_RUN: bool = _os.getenv("DRY_RUN", "false").lower() == "true"
 
 _pl_spec = importlib.util.spec_from_file_location(
     "prompt_logger",
@@ -65,11 +78,12 @@ EventType    = _pl_mod.EventType
 Component    = _pl_mod.Component
 
 # ---------------------------------------------------------------------------
-# Vault path
+# Vault paths
 # ---------------------------------------------------------------------------
 
 _VAULT_ROOT         = _PROJECT_ROOT / "vault"
 _NEEDS_ACTION_EMAIL = _VAULT_ROOT / "Needs_Action" / "email"
+_DEFERRED_EMAIL     = _VAULT_ROOT / "Deferred" / "email"   # graceful degradation
 
 # ---------------------------------------------------------------------------
 # Config
@@ -175,12 +189,14 @@ class GmailWatcher:
         max_emails: int = _MAX_RESULTS,
     ) -> None:
         _NEEDS_ACTION_EMAIL.mkdir(parents=True, exist_ok=True)
+        _DEFERRED_EMAIL.mkdir(parents=True, exist_ok=True)
 
         self._interval   = interval
         self._max_emails = max_emails
         self._seen: set[str] = set()   # message IDs seen this session
         self._google_ok  = _try_import_google()
         self._service    = None
+        self._rate       = get_limiter()
 
         self._logger = PromptLogger(component=Component.CLOUD_AGENT)
 
@@ -189,11 +205,20 @@ class GmailWatcher:
             summary="Gmail Watcher initialised (v1.0.0)",
             detail=(
                 f"Output: {_NEEDS_ACTION_EMAIL} | "
+                f"Deferred: {_DEFERRED_EMAIL} | "
                 f"Interval: {interval}s | "
                 f"Google libs available: {self._google_ok} | "
-                f"Credentials present: {_CREDENTIALS_PATH.exists()}"
+                f"Credentials present: {_CREDENTIALS_PATH.exists()} | "
+                f"DRY_RUN: {_DRY_RUN}"
             ),
         )
+        if _DRY_RUN:
+            print("  [GmailWatcher] DRY_RUN=true — .md files will NOT be written.")
+            self._logger.log(
+                event_type=EventType.SYSTEM_STARTUP,
+                summary="DRY_RUN mode active — no .md files will be written",
+                detail="Set DRY_RUN=false to enable real email file creation.",
+            )
 
     # ------------------------------------------------------------------
     # Public API
@@ -230,70 +255,116 @@ class GmailWatcher:
         return self._poll_stub()
 
     def _poll_gmail(self) -> int:
-        """Fetch unread Gmail messages and write .md files to Needs_Action/email/."""
+        """
+        Fetch unread Gmail messages and write .md files to Needs_Action/email/.
+
+        Retry: up to 3 attempts with exponential backoff (5s, 10s, 20s + jitter).
+        Graceful degradation: if all retries fail, writes a deferred record to
+        vault/Deferred/email/ for manual review — does NOT crash the watcher.
+        Rate limiting: email actions are capped at 10 per hour; excess messages
+        are skipped (they remain unread in Gmail for the next cycle).
+        """
         try:
-            if self._service is None:
-                self._service = _build_gmail_service()
-
-            results = (
-                self._service.users()
-                .messages()
-                .list(
-                    userId="me",
-                    labelIds=["INBOX", "UNREAD"],
-                    maxResults=self._max_emails,
-                )
-                .execute()
-            )
-            messages = results.get("messages", [])
-            written  = 0
-
-            for msg_ref in messages:
-                msg_id = msg_ref["id"]
-                if msg_id in self._seen:
-                    continue
-
-                msg = (
-                    self._service.users()
-                    .messages()
-                    .get(userId="me", id=msg_id, format="full")
-                    .execute()
-                )
-                headers = {
-                    h["name"].lower(): h["value"]
-                    for h in msg.get("payload", {}).get("headers", [])
-                }
-                sender  = headers.get("from", "unknown@unknown.com")
-                subject = headers.get("subject", "(no subject)")
-                body    = _extract_body(msg.get("payload", {}))[:1000]
-
-                if _sender_domain(sender) not in ALLOWED_DOMAINS:
-                    self._seen.add(msg_id)
-                    continue
-
-                received = datetime.now(timezone.utc).strftime(
-                    "%Y-%m-%dT%H:%M:%SZ"
-                )
-                self._write_email_file(
-                    sender=sender,
-                    subject=subject,
-                    received=received,
-                    body=body,
-                    msg_id=msg_id,
-                )
-                self._seen.add(msg_id)
-                written += 1
-
-            return written
-
+            return self._poll_gmail_with_retry()
         except Exception as exc:
+            # All retries exhausted — graceful degradation to Deferred/.
             self._logger.log(
                 event_type=EventType.TASK_FAILED,
-                summary="Gmail API error during poll",
+                summary="Gmail poll failed after retries — deferring",
                 detail=str(exc),
             )
-            print(f"[GmailWatcher] API error: {exc}")
+            self._defer_failed_poll(str(exc))
+            print(f"  [GmailWatcher] API error after retries: {exc} -> deferred")
             return 0
+
+    @with_retry(max_attempts=3, base_delay=5.0, backoff=2.0, jitter=True)
+    def _poll_gmail_with_retry(self) -> int:
+        """Inner Gmail poll, wrapped by with_retry via _poll_gmail."""
+        if self._service is None:
+            self._service = _build_gmail_service()
+
+        results = (
+            self._service.users()
+            .messages()
+            .list(
+                userId="me",
+                labelIds=["INBOX", "UNREAD"],
+                maxResults=self._max_emails,
+            )
+            .execute()
+        )
+        messages = results.get("messages", [])
+        written  = 0
+
+        for msg_ref in messages:
+            msg_id = msg_ref["id"]
+            if msg_id in self._seen:
+                continue
+
+            # Rate limit check — skip (not drop) if exceeded.
+            allowed, reason = self._rate.check("email")
+            if not allowed:
+                self._logger.log(
+                    event_type=EventType.TASK_FAILED,
+                    summary=f"Email rate limit reached — skipping msg {msg_id[:8]}",
+                    detail=reason,
+                )
+                print(f"  [GmailWatcher] RATE LIMIT: {reason}")
+                break  # remaining messages stay unread for next cycle
+
+            msg = (
+                self._service.users()
+                .messages()
+                .get(userId="me", id=msg_id, format="full")
+                .execute()
+            )
+            headers = {
+                h["name"].lower(): h["value"]
+                for h in msg.get("payload", {}).get("headers", [])
+            }
+            sender  = headers.get("from", "unknown@unknown.com")
+            subject = headers.get("subject", "(no subject)")
+            body    = _extract_body(msg.get("payload", {}))[:1000]
+
+            if _sender_domain(sender) not in ALLOWED_DOMAINS:
+                self._seen.add(msg_id)
+                continue
+
+            received = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            self._write_email_file(
+                sender=sender,
+                subject=subject,
+                received=received,
+                body=body,
+                msg_id=msg_id,
+            )
+            self._rate.record("email")
+            self._seen.add(msg_id)
+            written += 1
+
+        return written
+
+    def _defer_failed_poll(self, error: str) -> None:
+        """
+        Write a deferred record to vault/Deferred/email/ when Gmail API fails.
+
+        The deferred file records the failure timestamp and error message so
+        an operator can investigate. The watcher will retry on the next cycle.
+        """
+        _DEFERRED_EMAIL.mkdir(parents=True, exist_ok=True)
+        now      = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        safe_ts  = now.replace(":", "-")
+        filename = f"deferred_poll_{safe_ts}.json"
+        record   = {
+            "type":      "gmail_poll_failure",
+            "timestamp": now,
+            "error":     error,
+            "action":    "Will retry on next watcher cycle. Check credentials.json and Gmail API quota.",
+        }
+        (_DEFERRED_EMAIL / filename).write_text(
+            json.dumps(record, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
 
     def _poll_stub(self) -> int:
         """
@@ -351,6 +422,16 @@ class GmailWatcher:
             f"\n"
             f"{body}\n"
         )
+
+        if _DRY_RUN:
+            self._logger.log(
+                event_type=EventType.TASK_SUBMITTED,
+                summary=f"[DRY_RUN] Would write email file: {filename}",
+                detail=f"From: {sender} | Subject: {subject}",
+                metadata_extra={"dry_run": True, "msg_id": msg_id},
+            )
+            print(f"  [DRY_RUN] Would write: Needs_Action/email/{filename}")
+            return final_path
 
         tmp_path.write_text(content, encoding="utf-8")
         if final_path.exists():

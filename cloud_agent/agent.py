@@ -72,6 +72,14 @@ from pathlib import Path
 from typing import Optional
 
 # ---------------------------------------------------------------------------
+# DRY_RUN — global env flag.
+# When DRY_RUN=true the agent logs all intended vault writes but does NOT
+# create or rename any files. Safe for CI, staging, and integration tests.
+# Separate from MCP_DRY_RUN which controls external MCP action stubs.
+# ---------------------------------------------------------------------------
+_DRY_RUN: bool = os.getenv("DRY_RUN", "false").lower() == "true"
+
+# ---------------------------------------------------------------------------
 # Bootstrap prompt_logger via direct file load.
 # The project's logging/ directory shares its name with Python's stdlib
 # logging module. importlib.util loads it by path, sidestepping the collision.
@@ -99,6 +107,35 @@ Component    = _pl_mod.Component
 
 _VAULT_ROOT    = _PROJECT_ROOT / "vault"
 _VAULT_PENDING = _VAULT_ROOT / "Pending_Approval"
+
+# ---------------------------------------------------------------------------
+# Single-writer guard — Dashboard.md enforcement.
+# Cloud Agent must NEVER write Dashboard.md. Call _assert_not_dashboard(path)
+# before any file write to enforce the single-writer rule in code.
+# ---------------------------------------------------------------------------
+
+_DASHBOARD_PATH = _PROJECT_ROOT / "Dashboard.md"
+
+
+def _assert_not_dashboard(path: Path) -> None:
+    """
+    Enforcement guard: raise PermissionError if *path* resolves to Dashboard.md.
+
+    Cloud Agent owns vault/Updates/cloud_updates.md exclusively.
+    Dashboard.md is written only by LocalExecutor._write_dashboard().
+    """
+    try:
+        if Path(path).resolve() == _DASHBOARD_PATH.resolve():
+            raise PermissionError(
+                "Single-writer rule violation: Cloud Agent attempted to write "
+                "Dashboard.md. Cloud Agent must write to "
+                "vault/Updates/cloud_updates.md. "
+                "Only Local Executor may write Dashboard.md."
+            )
+    except PermissionError:
+        raise
+    except Exception:
+        pass
 
 # ---------------------------------------------------------------------------
 # Work Zones — five named routing zones with realistic task content.
@@ -205,9 +242,17 @@ class CloudAgent:
                 f"Vault Pending_Approval: {self._pending} | "
                 f"Needs_Action: {self._needs_action} | "
                 f"In_Progress/cloud: {self._in_progress_cloud} | "
-                f"Updates: {self._updates}"
+                f"Updates: {self._updates} | "
+                f"DRY_RUN: {_DRY_RUN}"
             ),
         )
+        if _DRY_RUN:
+            print("  [CloudAgent] DRY_RUN=true — vault writes are logged but NOT executed.")
+            self._logger.log(
+                event_type=EventType.SYSTEM_STARTUP,
+                summary="DRY_RUN mode active — no vault files will be written",
+                detail="Set DRY_RUN=false to enable real task manifest creation.",
+            )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -371,6 +416,12 @@ class CloudAgent:
                 f"- Last task: [{last_task_type}] id={last_task_id[:8]}..."
             )
 
+        # Enforce single-writer rule: guard against accidental Dashboard.md writes.
+        _assert_not_dashboard(self._updates_file)
+
+        if _DRY_RUN:
+            return  # DRY_RUN: skip cloud_updates.md append
+
         with self._updates_file.open("a", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
 
@@ -426,6 +477,18 @@ class CloudAgent:
 
         filename = final_path.name
         tmp_path = self._pending / (filename + ".tmp")
+
+        if _DRY_RUN:
+            # DRY_RUN: log intent only — no files written to vault.
+            self._logger.log(
+                event_type=EventType.TASK_SUBMITTED,
+                summary=f"[DRY_RUN] Would submit task [{task_type}] — skipped",
+                detail=f"File: {filename} | Content preview: {content[:120]}",
+                task_id=task_id,
+                metadata_extra={"dry_run": True, "vault_file": filename},
+            )
+            print(f"  [DRY_RUN] Would write: {filename}")
+            return task_id
 
         tmp_path.write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False),

@@ -53,6 +53,8 @@ AI_Employee_Vault_Platinum/
 │   └── registry.py           # Tool registry — maps task types to MCP handlers
 │
 ├── scripts/                  # Operational scripts
+│   ├── generate_briefing.py       # CEO daily briefing automation
+│   ├── cleanup_old_logs.py        # 90-day audit log retention
 │   ├── generate_evidence_pack.py  # Writes Evidence/JUDGE_PROOF.md
 │   └── run_daily_audit.py         # Daily audit runner
 │
@@ -62,7 +64,8 @@ AI_Employee_Vault_Platinum/
 │   └── mcp_health_report.py
 │
 ├── utils/                    # Shared helpers
-│   └── retry.py              # Retry decorator with backoff
+│   ├── retry.py              # Retry decorator with exponential backoff
+│   └── rate_limiter.py       # Per-category rate limiter (persistent state)
 │
 ├── prompts/                  # Stored prompt artifacts (processed task prompts)
 │
@@ -92,13 +95,18 @@ AI_Employee_Vault_Platinum/
 │   ├── Pending_Approval/     # Task manifests awaiting executor pickup
 │   ├── Approved/             # Human-approved tasks (Phase 3 gate)
 │   ├── Done/                 # Completed task manifests with results
-│   ├── Logs/                 # execution_log.json, health_log.json
+│   ├── Retry_Queue/          # Failed Odoo tasks pending human review (no_auto_retry)
+│   ├── Deferred/             # Graceful degradation queues
+│   │   └── email/            # Deferred Gmail poll records
+│   ├── Logs/                 # execution_log.json, health_log.json, rate_limit_state.json
 │   └── Updates/              # cloud_updates.md — Cloud Agent status feed for Dashboard
 │
 ├── watchdog.py               # Health Watchdog v1.0.0 — starts and monitors all three processes
 ├── cloud_agent.py            # Root entry point — bootstraps and delegates to cloud_agent/agent.py
 ├── local_executor.py         # Root entry point — bootstraps and delegates to local_executor/executor.py
 ├── odoo_client.py            # Odoo XML-RPC client — partner + draft invoice creation (draft-only)
+├── Business_Goals.md         # CEO OKRs, revenue targets, escalation policy
+├── Briefings/                # CEO daily briefings (generated runtime output, gitignored)
 ├── .gitignore                # Excludes secrets, runtime artifacts, and vault state files
 └── README.md                 # This file
 ```
@@ -645,3 +653,131 @@ cat Evidence/JUDGE_PROOF.md
 
 Reads live vault state and the last 20 prompt log entries, then writes a
 single judge-ready markdown file containing the full audit trail.
+
+---
+
+## Permission Boundary Policy
+
+| Component | Vault Read | Vault Write | External Network | Odoo API | Dashboard.md | Retry_Queue |
+|---|---|---|---|---|---|---|
+| **Cloud Agent** | `Needs_Action/`, `Done/` | `Pending_Approval/`, `In_Progress/cloud/`, `Updates/` | HuggingFace (inbound) | ❌ Never | ❌ Forbidden | ❌ Never |
+| **Gmail Watcher** | — | `Needs_Action/email/`, `Deferred/email/` | Gmail API (outbound) | ❌ Never | ❌ Never | ❌ Never |
+| **Local Executor** | `Pending_Approval/` | `In_Progress/local/`, `Done/`, `Logs/`, `Retry_Queue/` | Odoo XML-RPC (outbound) | ✅ Read/write draft only | ✅ **Only writer** | ✅ Write on failure |
+| **Watchdog** | — | `Logs/health_log.json` | — | ❌ Never | ❌ Never | ❌ Never |
+| **Human Approver** | `Pending_Approval/` | `Approved/` | — | Manual confirmation | — | Manual re-queue |
+
+**Enforcement mechanisms:**
+- `_assert_not_dashboard(path)` in Cloud Agent raises `PermissionError` if Dashboard.md write is attempted.
+- `DRY_RUN=true` skips all vault writes and external calls (CI/staging safe).
+- Rate limiter enforces: email ≤ 10/hr, social ≤ 20/hr, payment ≤ 3/day.
+- Payment tasks in Retry_Queue are flagged `no_auto_retry=True` — human action required.
+
+---
+
+## Production Topology
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     INTERNET / CLOUD TIER                       │
+│                                                                 │
+│   ┌──────────────────────────────┐   ┌─────────────────────┐   │
+│   │  HuggingFace Spaces          │   │  Gmail API           │   │
+│   │  Cloud Agent (always-on)     │   │  (OAuth 2.0)         │   │
+│   │  python watchdog.py          │   │  gmail_watcher.py    │   │
+│   │  --start-all --interval 10   │   │  --daemon --interval │   │
+│   └──────────────┬───────────────┘   └────────┬────────────┘   │
+│                  │ writes task manifests        │ writes .md     │
+└──────────────────┼──────────────────────────────┼───────────────┘
+                   │                              │
+┌──────────────────▼──────────────────────────────▼───────────────┐
+│                     VAULT TIER (Shared Storage)                  │
+│                                                                  │
+│   vault/Needs_Action/email/   ← Gmail watcher deposits here      │
+│   vault/In_Progress/cloud/    ← Cloud Agent claim staging        │
+│   vault/Pending_Approval/     ← Task manifests await executor    │
+│   vault/In_Progress/local/    ← Local Executor claim staging     │
+│   vault/Done/                 ← Completed manifests + results    │
+│   vault/Retry_Queue/          ← Failed tasks awaiting review     │
+│   vault/Deferred/email/       ← Deferred Gmail polls             │
+│   vault/Logs/                 ← Execution + health + rate logs   │
+│   vault/Updates/              ← Cloud Agent heartbeat feed       │
+└──────────────────────────────────┬───────────────────────────────┘
+                                   │
+┌──────────────────────────────────▼───────────────────────────────┐
+│                     LOCAL TIER (On-Premise)                       │
+│                                                                   │
+│   ┌─────────────────────────┐   ┌──────────────────────────────┐  │
+│   │  Local Executor         │   │  Odoo 16/17 (cloud VM)       │  │
+│   │  executor.py --poll 2   │──▶│  XML-RPC API                 │  │
+│   │  Writes Dashboard.md    │   │  Draft partner + invoice      │  │
+│   │  Writes Retry_Queue/    │   │  No auto-confirm              │  │
+│   └─────────────────────────┘   └──────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────────┘
+
+Human approval gate (Phase 3): Pending_Approval/ → Approved/ → Local Executor
+```
+
+### Startup Command (Production)
+
+```bash
+# Single command starts all three processes with health monitoring:
+python watchdog.py --start-all --interval 15
+
+# Or as a systemd service (see Odoo Cloud Deployment section above):
+sudo systemctl start ai-vault
+```
+
+### Operational Scripts
+
+| Script | Purpose | Schedule |
+|---|---|---|
+| `scripts/generate_briefing.py` | CEO daily briefing (vault state + revenue + health) | Daily 07:00 UTC |
+| `scripts/cleanup_old_logs.py` | 90-day retention purge of vault/Logs + Retry_Queue | Weekly Sunday 02:00 UTC |
+| `scripts/generate_evidence_pack.py` | Judge/auditor evidence pack from prompt log | On-demand |
+| `scripts/run_daily_audit.py` | Daily audit run + report | Daily 06:00 UTC |
+
+---
+
+## Security
+
+### Threat Model Summary
+
+| Threat | Mitigation |
+|---|---|
+| Prompt injection via email | Gmail Watcher writes raw content only — Cloud Agent applies schema validation before manifest creation |
+| Replay attack (duplicate task) | Session-scoped `_processed` set deduplicates task IDs within Local Executor lifetime |
+| Concurrent executor instances | Claim-by-move: `Path.rename()` is atomic — only one executor can claim a file |
+| Vault file tampering | SHA-256 hash-chained `history/prompt_log.json` — any modification invalidates the chain |
+| Credential exposure | All secrets in `.env` (gitignored); no secret in any vault file or manifest |
+| Runaway AI spending | Rate limiter: payment ≤ 3/day, `no_auto_retry=True` enforced in code and logs |
+| Cloud Agent writes Dashboard.md | `_assert_not_dashboard()` raises `PermissionError` at runtime — not just policy |
+| Odoo over-execution | Draft-only rule: `odoo_client.py` never confirms or posts invoices |
+| Log deletion / cover-up | Append-only JSONL + SHA-256 chain makes log modification detectable |
+| CI/staging contamination | `DRY_RUN=true` skips all vault writes and external API calls globally |
+
+### Secret Management
+
+```
+.env              — Odoo URL, DB, user, password (gitignored, never committed)
+credentials.json  — Gmail OAuth 2.0 client credentials (gitignored)
+token.json        — Gmail OAuth 2.0 access token (gitignored)
+```
+
+Never commit these files. The `.gitignore` explicitly excludes all three.
+Rotate credentials immediately if any are exposed.
+
+### Audit Log Integrity
+
+```bash
+# Verify hash chain integrity:
+python -c "
+import json, hashlib
+lines = open('history/prompt_log.json').read().splitlines()
+prev = '0' * 64
+for i, line in enumerate(lines):
+    rec = json.loads(line)
+    prev = rec.get('prev_hash', prev)
+    print(f'Entry {i+1}: prev_hash={prev[:16]}... entry_hash={rec[\"entry_hash\"][:16]}...')
+print('Chain intact if no KeyError above.')
+"
+```

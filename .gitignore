@@ -17,9 +17,17 @@ vault/Pending_Approval/*.json
 vault/In_Progress/**
 vault/Needs_Action/**
 vault/Updates/**
+vault/Deferred/**
+vault/Retry_Queue/**
 history/*.json
 Evidence/JUDGE_PROOF.md
 Dashboard.md
+
+# Briefings (generated runtime output)
+Briefings/*.md
+
+# Rate limiter state (runtime counter — not a source artifact)
+vault/Logs/rate_limit_state.json
 
 # Claude IDE settings
 .claude/

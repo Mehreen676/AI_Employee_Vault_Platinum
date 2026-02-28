@@ -72,6 +72,18 @@ from typing import Optional
 
 _PROJECT_ROOT = Path(__file__).parent.parent
 
+# Ensure project root is on sys.path so utils.* imports resolve.
+if str(_PROJECT_ROOT) not in _sys.path:
+    _sys.path.insert(0, str(_PROJECT_ROOT))
+
+# ---------------------------------------------------------------------------
+# DRY_RUN — global env flag.
+# When DRY_RUN=true the executor validates manifests and logs actions but does
+# NOT move any files between vault directories. External integrations (Odoo)
+# are also skipped. Safe for CI, staging, and end-to-end integration tests.
+# ---------------------------------------------------------------------------
+_DRY_RUN: bool = os.getenv("DRY_RUN", "false").lower() == "true"
+
 _pl_spec = importlib.util.spec_from_file_location(
     "prompt_logger",
     _PROJECT_ROOT / "logging" / "prompt_logger.py",
@@ -84,11 +96,15 @@ PromptLogger = _pl_mod.PromptLogger
 EventType    = _pl_mod.EventType
 Component    = _pl_mod.Component
 
+from utils.retry import with_retry          # noqa: E402
+from utils.rate_limiter import get_limiter  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Vault paths
 # ---------------------------------------------------------------------------
 
-_VAULT_ROOT = _PROJECT_ROOT / "vault"
+_VAULT_ROOT   = _PROJECT_ROOT / "vault"
+_RETRY_QUEUE  = _VAULT_ROOT / "Retry_Queue"  # failed non-payment tasks pending retry
 
 # ---------------------------------------------------------------------------
 # Dotenv loader (stdlib only — no python-dotenv dependency).
@@ -124,6 +140,8 @@ _ODOO_CONTENT_RE = re.compile(
 )
 
 
+@with_retry(max_attempts=3, base_delay=5.0, backoff=2.0, jitter=True,
+            exceptions=(Exception,))
 def _run_odoo_task(content: str) -> str:
     """
     Execute an approved odoo task: create a partner and a draft AED invoice.
@@ -245,9 +263,11 @@ class LocalExecutor:
             self._in_progress_local,
             self._done,
             self._logs,
+            _RETRY_QUEUE,
         ]:
             _dir.mkdir(parents=True, exist_ok=True)
 
+        self._rate   = get_limiter()
         self._logger = PromptLogger(
             component=Component.LOCAL_EXECUTOR,
             executor_version="1.3.0",
@@ -260,10 +280,18 @@ class LocalExecutor:
                 f"Executor ID: {self._executor_id} | "
                 f"Watching: {self._pending} | "
                 f"In_Progress/local: {self._in_progress_local} | "
-                f"Poll interval: {self._poll_interval}s"
+                f"Poll interval: {self._poll_interval}s | "
+                f"DRY_RUN: {_DRY_RUN}"
             ),
             metadata_extra={"executor_id": self._executor_id},
         )
+        if _DRY_RUN:
+            print("  [LocalExecutor] DRY_RUN=true — vault file moves will NOT be executed.")
+            self._logger.log(
+                event_type=EventType.SYSTEM_STARTUP,
+                summary="DRY_RUN mode active — no files will be moved",
+                detail="Set DRY_RUN=false to enable real task processing.",
+            )
 
     # ------------------------------------------------------------------
     # Public API
@@ -371,7 +399,38 @@ class LocalExecutor:
             )
             return
 
-        # --- 3. Log start ---
+        # --- 3. Rate limit check ---
+        # Map task_type to a rate-limit category.
+        _rate_category = (
+            "payment" if task_type == "odoo"
+            else "email" if task_type == "email"
+            else "file"
+        )
+        _allowed, _reason = self._rate.check(_rate_category)
+        if not _allowed:
+            self._logger.log(
+                event_type=EventType.TASK_FAILED,
+                summary=f"Rate limit reached for [{_rate_category}] — skipping task",
+                detail=_reason,
+                task_id=task_id,
+            )
+            print(f"  [LocalExecutor] RATE LIMIT [{_rate_category}]: {_reason}")
+            return
+
+        # --- 4. DRY_RUN shortcut ---
+        if _DRY_RUN:
+            self._logger.log(
+                event_type=EventType.TASK_COMPLETED,
+                summary=f"[DRY_RUN] Would process [{task_type}] — skipped",
+                detail=f"File: {manifest_path.name} | task_id={task_id}",
+                task_id=task_id,
+                metadata_extra={"dry_run": True, "executor_id": self._executor_id},
+            )
+            print(f"  [DRY_RUN] Would move: {manifest_path.name} -> Done/")
+            self._processed.add(task_id)
+            return
+
+        # --- 5. Log start ---
         self._logger.log(
             event_type=EventType.TASK_EXECUTION_STARTED,
             summary=f"Processing task [{task_type}] from Pending_Approval/",
@@ -380,7 +439,7 @@ class LocalExecutor:
             metadata_extra={"executor_id": self._executor_id},
         )
 
-        # --- 4. Claim by atomic rename: Pending_Approval/ -> In_Progress/local/ ---
+        # --- 6. Claim by atomic rename: Pending_Approval/ -> In_Progress/local/ ---
         filename         = manifest_path.name
         in_progress_path = self._in_progress_local / filename
 
@@ -396,16 +455,27 @@ class LocalExecutor:
             )
             return
 
-        # --- 5. Mutate manifest ---
+        # --- 7. Mutate manifest ---
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
         manifest["status"]       = "approved"
         manifest["approved_at"]  = now_iso
         manifest["processed_by"] = self._executor_id
 
-        # --- 6. Run integration handler (odoo tasks only) ---
+        # --- 8. Run integration handler (odoo tasks only) ---
+        # Odoo calls have @with_retry (3 attempts, exponential backoff).
+        # On failure, route to vault/Retry_Queue/ — NEVER auto-retry payments.
         if task_type == "odoo":
             content = manifest.get("content", "")
-            odoo_result = _run_odoo_task(content)
+            try:
+                odoo_result = _run_odoo_task(content)
+            except Exception as exc:
+                odoo_result = f"error: {str(exc)[:200]}"
+
+            if odoo_result.startswith("error"):
+                # Write to Retry_Queue/ for human review.
+                # Payments are marked no_auto_retry=True in rate_limiter limits.
+                self._write_retry_queue(task_id, task_type, content, odoo_result, now_iso)
+
             self._logger.log(
                 event_type=EventType.TASK_COMPLETED,
                 summary=f"Odoo task execution: {odoo_result[:80]}",
@@ -415,6 +485,9 @@ class LocalExecutor:
             )
         else:
             odoo_result = "success"
+
+        # Record rate limit increment after successful task pickup.
+        self._rate.record(_rate_category)
 
         # --- 7. Write updated manifest to Done/ via tmp-then-rename ---
         tmp_path  = self._done / (filename + ".tmp")
@@ -456,6 +529,78 @@ class LocalExecutor:
         # --- 11. Mark processed and confirm ---
         self._processed.add(task_id)
         _print_task_line(task_type, task_id, filename, odoo_result)
+
+    # ------------------------------------------------------------------
+    # Retry Queue writer (graceful degradation)
+    # ------------------------------------------------------------------
+
+    def _write_retry_queue(
+        self,
+        task_id: str,
+        task_type: str,
+        content: str,
+        error: str,
+        timestamp: str,
+    ) -> None:
+        """
+        Write a failed task to vault/Retry_Queue/ for human review.
+
+        Called when an Odoo task exhausts all @with_retry attempts.
+
+        Graceful degradation rules:
+            - Payment tasks (task_type="odoo") must NEVER be auto-retried.
+              The record is written to Retry_Queue/ and flagged no_auto_retry=True.
+            - A human must inspect and re-queue manually.
+            - All failures are logged via PromptLogger.
+
+        File naming:
+            retry_<task_id_short>_<timestamp_slug>.json
+        """
+        no_auto_retry = task_type in ("odoo", "payment")
+        ts_slug = timestamp.replace(":", "").replace(".", "").replace("Z", "")[:17]
+        filename = f"retry_{task_id[:8]}_{ts_slug}.json"
+        dest = _RETRY_QUEUE / filename
+
+        record = {
+            "task_id":       task_id,
+            "task_type":     task_type,
+            "content":       content,
+            "error":         error,
+            "failed_at":     timestamp,
+            "no_auto_retry": no_auto_retry,
+            "reviewed":      False,
+        }
+
+        tmp = _RETRY_QUEUE / (filename + ".tmp")
+        try:
+            tmp.write_text(
+                json.dumps(record, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            if dest.exists():
+                dest.unlink()
+            tmp.rename(dest)
+        except OSError as exc:
+            self._logger.log(
+                event_type=EventType.TASK_FAILED,
+                summary=f"Failed to write Retry_Queue entry: {filename}",
+                detail=str(exc),
+                task_id=task_id,
+            )
+            return
+
+        no_retry_note = " — PAYMENT: no auto-retry, human review required" if no_auto_retry else ""
+        self._logger.log(
+            event_type=EventType.TASK_FAILED,
+            summary=f"Task routed to Retry_Queue/{filename}{no_retry_note}",
+            detail=f"task_id={task_id} | error={error[:120]} | no_auto_retry={no_auto_retry}",
+            task_id=task_id,
+            metadata_extra={"retry_queue_file": str(dest), "no_auto_retry": no_auto_retry},
+        )
+        print(
+            f"  [RETRY_QUEUE] {task_type} task {task_id[:8]}... -> "
+            f"vault/Retry_Queue/{filename}{no_retry_note}"
+        )
 
     # ------------------------------------------------------------------
     # Execution log writer
