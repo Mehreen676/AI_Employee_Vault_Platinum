@@ -1,0 +1,12 @@
+{
+  "id": "75531ddc1851",
+  "timestamp": "2026-02-25T09:05:09.225826+00:00",
+  "server": "mcp_router",
+  "action": "dispatch_ok.odoo_list_invoices",
+  "details": {
+    "action_type": "odoo_list_invoices",
+    "dry_run": true,
+    "result": "dry_run_logged"
+  },
+  "success": true
+}

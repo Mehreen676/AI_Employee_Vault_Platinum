@@ -1,0 +1,12 @@
+{
+  "id": "c9deb6b75394",
+  "timestamp": "2026-02-18T10:00:24.677210+00:00",
+  "server": "gold_agent",
+  "action": "task_completed",
+  "details": {
+    "name": "demo_personal.md",
+    "domain": "personal",
+    "status": "fallback"
+  },
+  "success": true
+}

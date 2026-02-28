@@ -1,0 +1,16 @@
+{
+  "id": "aff8a9637649",
+  "timestamp": "2026-02-25T09:05:09.238985+00:00",
+  "server": "social_mcp_stub",
+  "action": "social_post_twitter_dry_run",
+  "details": {
+    "action_type": "social_post_twitter",
+    "platform": "twitter",
+    "account": "@AIEmployeeVault",
+    "task_file": "twitter_post_demo.md",
+    "dry_run": true,
+    "simulated_post_id": "tw_79504853697_simulated",
+    "note": "social_safety_gate active \u2014 live posting permanently blocked in stub."
+  },
+  "success": true
+}

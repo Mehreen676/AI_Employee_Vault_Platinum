@@ -1,0 +1,15 @@
+{
+  "id": "32c3c127dbdb",
+  "timestamp": "2026-02-25T09:05:09.227119+00:00",
+  "server": "odoo_mcp_stub",
+  "action": "odoo_create_partner_dry_run",
+  "details": {
+    "action_type": "odoo_create_partner",
+    "name": "Demo Contact",
+    "email": "demo@example.com",
+    "task_file": "odoo_demo.md",
+    "dry_run": true,
+    "note": "Set MCP_DRY_RUN=false + configure ODOO_* env vars for real execution."
+  },
+  "success": true
+}

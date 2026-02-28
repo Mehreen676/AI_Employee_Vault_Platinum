@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m cloud_agent.task_generator --count 3)",
+      "Bash(python -m local_executor.watcher --once)",
+      "Bash(python -c \":*)",
+      "Bash(python -m cloud_agent.task_generator --count 2)",
+      "Bash(python -m cloud_agent.agent --help)",
+      "Bash(timeout 7 python -m cloud_agent.agent --auto --interval 2)"
+    ]
+  }
+}

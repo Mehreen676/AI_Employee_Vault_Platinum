@@ -1,0 +1,14 @@
+{
+  "id": "82f8eda4f323",
+  "timestamp": "2026-02-25T09:05:09.241466+00:00",
+  "server": "social_mcp_stub",
+  "action": "social_get_analytics_simulated",
+  "details": {
+    "action_type": "social_get_analytics",
+    "platform": "all",
+    "period": "30d",
+    "task_file": "monthly_report.md",
+    "simulated": true
+  },
+  "success": true
+}

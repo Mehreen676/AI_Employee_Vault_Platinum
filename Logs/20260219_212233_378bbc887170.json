@@ -1,0 +1,11 @@
+{
+  "id": "378bbc887170",
+  "timestamp": "2026-02-19T21:22:33.350162+00:00",
+  "server": "domain_router",
+  "action": "get_all_domain_tasks",
+  "details": {
+    "business_count": 1,
+    "personal_count": 1
+  },
+  "success": true
+}

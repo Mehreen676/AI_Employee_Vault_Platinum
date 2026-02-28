@@ -1,0 +1,12 @@
+{
+  "id": "aaf83f8b1264",
+  "timestamp": "2026-02-25T09:05:09.242835+00:00",
+  "server": "mcp_router",
+  "action": "dispatch_ok.social_get_analytics",
+  "details": {
+    "action_type": "social_get_analytics",
+    "dry_run": true,
+    "result": "simulated_analytics"
+  },
+  "success": true
+}

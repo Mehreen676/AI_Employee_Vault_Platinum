@@ -1,0 +1,12 @@
+{
+  "id": "6d0a9aed79a8",
+  "timestamp": "2026-02-25T05:05:39.102898+00:00",
+  "server": "mcp_router",
+  "action": "dispatch_ok.odoo_create_partner",
+  "details": {
+    "action_type": "odoo_create_partner",
+    "dry_run": true,
+    "result": "dry_run_logged"
+  },
+  "success": true
+}

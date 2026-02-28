@@ -1,0 +1,12 @@
+{
+  "id": "00c565bd1318",
+  "timestamp": "2026-02-25T09:05:09.240297+00:00",
+  "server": "mcp_router",
+  "action": "dispatch_ok.social_post_twitter",
+  "details": {
+    "action_type": "social_post_twitter",
+    "dry_run": true,
+    "result": "dry_run_logged"
+  },
+  "success": true
+}

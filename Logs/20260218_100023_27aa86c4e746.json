@@ -1,0 +1,11 @@
+{
+  "id": "27aa86c4e746",
+  "timestamp": "2026-02-18T10:00:23.113949+00:00",
+  "server": "mcp_file_ops",
+  "action": "move_task",
+  "details": {
+    "src": "/home/runner/work/AI_Employee_Vault_Gold_Hackathon0/AI_Employee_Vault_Gold_Hackathon0/Inbox/demo_personal.md",
+    "dst": "/home/runner/work/AI_Employee_Vault_Gold_Hackathon0/AI_Employee_Vault_Gold_Hackathon0/Needs_Action/demo_personal.md"
+  },
+  "success": true
+}

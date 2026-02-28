@@ -1,0 +1,15 @@
+{
+  "id": "f29ed7a478ad",
+  "timestamp": "2026-02-25T05:05:39.099553+00:00",
+  "server": "odoo_mcp_stub",
+  "action": "odoo_list_invoices_dry_run",
+  "details": {
+    "action_type": "odoo_list_invoices",
+    "limit": 5,
+    "state": "all",
+    "task_file": "odoo_demo.md",
+    "dry_run": true,
+    "note": "Set MCP_DRY_RUN=false + configure ODOO_* env vars for real execution."
+  },
+  "success": true
+}

@@ -1,0 +1,17 @@
+{
+  "id": "df3500d2803b",
+  "timestamp": "2026-02-23T12:02:28.252345+00:00",
+  "server": "gold_agent",
+  "action": "agent_complete",
+  "details": {
+    "loops": 1,
+    "tasks_processed": 0,
+    "tasks_failed": 0,
+    "retries": {},
+    "db_enabled": true,
+    "run_id": 135,
+    "db_events": 24,
+    "openai_required": true
+  },
+  "success": true
+}

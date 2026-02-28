@@ -1,0 +1,10 @@
+{
+  "id": "2159b92b2fd0",
+  "timestamp": "2026-02-18T10:00:23.484052+00:00",
+  "server": "gold_agent",
+  "action": "openai_fallback",
+  "details": {
+    "reason": "no_key_or_lib"
+  },
+  "success": true
+}

@@ -1,0 +1,9 @@
+{
+  "id": "8aff692e-c084-4917-b215-10b194b953e4",
+  "task_type": "summarize_document",
+  "content": "Summarize the Q1 2026 sales performance report. Extract: total revenue, top 3 product categories, regional breakdown, and YoY growth percentage.",
+  "created_at": "2026-02-27T07:34:29.457499Z",
+  "status": "approved",
+  "approved_at": "2026-02-27T07:37:40.625752Z",
+  "processed_by": "62c0d9b5-2f2a-4281-9919-5291666457f3"
+}

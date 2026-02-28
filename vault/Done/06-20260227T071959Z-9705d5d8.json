@@ -1,0 +1,11 @@
+{
+  "id": "9705d5d8-cb21-431c-b108-a135cec4b330",
+  "task_type": "data_analysis",
+  "content": "Analyse customer churn data for March 2026. Identify the top 3 churn drivers, segment by subscription tier, and produce a risk-ranked cohort list.",
+  "created_at": "2026-02-27T07:19:59.752230Z",
+  "status": "approved",
+  "priority": 6,
+  "approved_at": "2026-02-27T07:20:29.910268Z",
+  "processed_by": "e677cfa1-894f-4082-ac47-48fd94cbb05b",
+  "phase_note": "Auto-approved by Local Executor (Phase 2). Human approval gate activates in Phase 3."
+}

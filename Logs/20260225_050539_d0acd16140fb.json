@@ -1,0 +1,12 @@
+{
+  "id": "d0acd16140fb",
+  "timestamp": "2026-02-25T05:05:39.107957+00:00",
+  "server": "mcp_router",
+  "action": "dispatch_ok.social_post_facebook",
+  "details": {
+    "action_type": "social_post_facebook",
+    "dry_run": true,
+    "result": "dry_run_logged"
+  },
+  "success": true
+}

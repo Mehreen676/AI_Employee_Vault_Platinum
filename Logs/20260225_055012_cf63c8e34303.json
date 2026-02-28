@@ -1,0 +1,11 @@
+{
+  "id": "cf63c8e34303",
+  "timestamp": "2026-02-25T05:50:12.277396+00:00",
+  "server": "domain_router",
+  "action": "classify_task",
+  "details": {
+    "method": "header",
+    "domain": "business"
+  },
+  "success": true
+}
