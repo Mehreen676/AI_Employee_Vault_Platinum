@@ -325,3 +325,73 @@ Security model for logs: [specs/security_model.md §6](specs/security_model.md)
 ---
 
 *AI Employee Vault – Platinum Tier | v1.0.0 | Enterprise Distributed AI Task Management*
+
+---
+
+## ✅ Platinum Judge Demo
+
+End-to-end demonstration of the distributed pipeline in five steps.
+All commands run from the project root.
+
+**Step 1 — Start the Cloud Agent (daemon + auto task generation)**
+
+```bash
+python cloud_agent.py --daemon --auto --interval 5
+```
+
+The agent emits a heartbeat every 5 seconds and writes one task manifest to
+`vault/Pending_Approval/` per cycle. Use `--task-type odoo` to generate
+Odoo partner/invoice tasks specifically:
+
+```bash
+python cloud_agent.py --daemon --auto --interval 5 --task-type odoo
+```
+
+**Step 2 — Start the Local Executor (in a separate terminal)**
+
+```bash
+python local_executor.py --poll 2
+```
+
+The executor polls `vault/Pending_Approval/` every 2 seconds, moves approved
+tasks to `vault/Done/`, and for `task_type=odoo` calls `odoo_client.py` to
+create a partner and draft invoice in Odoo (requires `.env` with `ODOO_*`
+vars; degrades gracefully if not configured).
+
+**Step 3 — Observe the Pending_Approval to Done movement**
+
+```bash
+# Before executor picks up tasks:
+ls vault/Pending_Approval/
+
+# After executor processes them:
+ls vault/Done/
+
+# Live execution log (JSONL, one record per task):
+cat vault/Logs/execution_log.json
+```
+
+Each execution log record includes:
+```json
+{"id": "...", "task_type": "odoo", "action": "approved_and_moved",
+ "timestamp": "...", "from": "Pending_Approval", "to": "Done", "result": "success"}
+```
+
+**Step 4 — Generate the Evidence Pack**
+
+```bash
+python scripts/generate_evidence_pack.py --n 20
+```
+
+Reads live vault state and the last 20 prompt log entries, then writes a
+single judge-ready markdown file.
+
+**Step 5 — Open Evidence/JUDGE_PROOF.md**
+
+```bash
+cat Evidence/JUDGE_PROOF.md
+```
+
+The file contains: UTC timestamp, pending/done task counts, last 5 execution
+log entries, last 5 prompt history entries, and an integrity statement
+referencing the SHA-256 hash chain in `history/prompt_log.json`.

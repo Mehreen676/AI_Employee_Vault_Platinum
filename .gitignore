@@ -10,9 +10,15 @@ __pycache__/
 *.pyc
 venv/
 
-# Logs
+# Runtime artifacts (do not commit)
 vault/Logs/*.json
+vault/Done/*.json
+vault/Pending_Approval/*.json
 history/*.json
+Evidence/JUDGE_PROOF.md
+
+# Claude IDE settings
+.claude/
 
 # OS
 .DS_Store

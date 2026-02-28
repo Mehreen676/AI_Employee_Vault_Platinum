@@ -3,7 +3,7 @@ AI Employee Vault – Platinum Tier
 Local Executor — Core Implementation
 
 Module:   local_executor/executor.py
-Version:  1.1.0
+Version:  1.2.0
 
 Responsibility:
     Watches vault/Pending_Approval/ for task manifest files.
@@ -13,9 +13,11 @@ Responsibility:
         3. Logs task_execution_started via PromptLogger.
         4. Mutates manifest: status → "approved", records timestamp.
         5. Atomically moves manifest to vault/Done/ (write-tmp → rename).
-        6. Appends a structured record to vault/Logs/execution_log.json.
-        7. Logs task_completed via PromptLogger.
-        8. Prints a confirmation line to stdout.
+        6. If task_type == "odoo": calls odoo_client.py to create partner
+           and draft invoice; logs result as "success" or "error: <reason>".
+        7. Appends a structured record to vault/Logs/execution_log.json.
+        8. Logs task_completed via PromptLogger.
+        9. Prints a confirmation line to stdout.
 
     NOTE: In this phase the executor auto-approves tasks from Pending_Approval/
     directly. In Phase 3, a human approval UI will be inserted between
@@ -38,6 +40,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import sys as _sys
 import time
 import uuid
@@ -72,6 +75,101 @@ Component    = _pl_mod.Component
 # ---------------------------------------------------------------------------
 
 _VAULT_ROOT = _PROJECT_ROOT / "vault"
+
+# ---------------------------------------------------------------------------
+# Dotenv loader (stdlib only — no python-dotenv dependency).
+# Loads .env from project root into os.environ before Odoo client reads vars.
+# Only sets keys that are not already present in the environment.
+# ---------------------------------------------------------------------------
+
+
+def _load_dotenv(env_path: Path) -> None:
+    """Load key=value pairs from *env_path* into os.environ if file exists."""
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key   = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+# ---------------------------------------------------------------------------
+# Odoo task runner
+# Loaded lazily via importlib.util to avoid hard import dependency.
+# Gracefully degrades when odoo_client.py is absent or env vars are unset.
+# ---------------------------------------------------------------------------
+
+_ODOO_CONTENT_RE = re.compile(
+    r"Create partner:\s*(.+?),\s*Create draft invoice:\s*([\d.]+)\s*AED",
+    re.IGNORECASE,
+)
+
+
+def _run_odoo_task(content: str) -> str:
+    """
+    Execute an approved odoo task: create a partner and a draft AED invoice.
+
+    Steps:
+        1. Load .env (if present) into os.environ.
+        2. Import odoo_client.py by file path.
+        3. Build OdooClient.from_env() — raises OdooError if vars missing.
+        4. Parse partner name and amount from task content.
+        5. Authenticate, create partner, create draft invoice.
+        6. Return "success: partner_id=<id> invoice_id=<id>"
+           or   "error: <reason>" on any failure.
+
+    Failure modes:
+        - odoo_client.py not found          → "error: odoo_client.py not found"
+        - Env vars missing / unconfigured   → "error: odoo tool not configured"
+        - Content format unrecognised       → "error: cannot parse content"
+        - Network / auth / API failure      → "error: <exception message>"
+    """
+    _load_dotenv(_PROJECT_ROOT / ".env")
+
+    odoo_path = _PROJECT_ROOT / "odoo_client.py"
+    if not odoo_path.exists():
+        return "error: odoo_client.py not found"
+
+    # Load odoo_client module by path to avoid import system collisions.
+    try:
+        _oc_spec = importlib.util.spec_from_file_location("odoo_client", odoo_path)
+        _oc_mod  = importlib.util.module_from_spec(_oc_spec)
+        _sys.modules.setdefault("odoo_client", _oc_mod)
+        _oc_spec.loader.exec_module(_oc_mod)
+        OdooClient = _oc_mod.OdooClient
+    except Exception as exc:
+        return f"error: failed to load odoo_client: {exc}"
+
+    # Attempt to build client from env vars — fails fast if unconfigured.
+    try:
+        client = OdooClient.from_env()
+    except Exception:
+        return "error: odoo tool not configured"
+
+    # Parse content: "Create partner: <name>, Create draft invoice: <amount> AED"
+    match = _ODOO_CONTENT_RE.match(content.strip())
+    if not match:
+        return f"error: cannot parse odoo content: {content[:80]}"
+
+    partner_name = match.group(1).strip()
+    amount       = float(match.group(2))
+
+    try:
+        client.authenticate()
+        partner_id  = client.create_partner_stub(name=partner_name)
+        invoice_id  = client.create_invoice_stub(
+            partner_id=partner_id,
+            lines=[{"name": "Service", "quantity": 1.0, "price_unit": amount}],
+            currency_code="AED",
+        )
+        return f"success: partner_id={partner_id} invoice_id={invoice_id}"
+    except Exception as exc:
+        return f"error: {str(exc)[:200]}"
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +220,7 @@ class LocalExecutor:
 
         self._logger = PromptLogger(
             component=Component.LOCAL_EXECUTOR,
-            executor_version="1.1.0",
+            executor_version="1.2.0",
         )
 
         self._logger.log(
@@ -265,30 +363,46 @@ class LocalExecutor:
         manifest_path.unlink()
         tmp_path.rename(dest_path)
 
-        # --- 7. Append to execution_log.json ---
+        # --- 7. Run integration handler (odoo tasks only) ---
+        if task_type == "odoo":
+            content = manifest.get("content", "")
+            odoo_result = _run_odoo_task(content)
+            self._logger.log(
+                event_type=EventType.TASK_COMPLETED,
+                summary=f"Odoo task execution: {odoo_result[:80]}",
+                detail=f"task_id={task_id} | content={content[:120]} | result={odoo_result}",
+                task_id=task_id,
+                metadata_extra={"odoo_result": odoo_result, "executor_id": self._executor_id},
+            )
+        else:
+            odoo_result = "success"
+
+        # --- 8. Append to execution_log.json ---
         self._append_execution_log(
             task_id=task_id,
             task_type=task_type,
             timestamp=now_iso,
+            result=odoo_result,
         )
 
-        # --- 8. Log completion ---
+        # --- 9. Log completion ---
         self._logger.log(
             event_type=EventType.TASK_COMPLETED,
             summary=f"Task approved and moved to Done/: [{task_type}]",
-            detail=f"File: {filename}",
+            detail=f"File: {filename} | result={odoo_result}",
             task_id=task_id,
             metadata_extra={
                 "executor_id": self._executor_id,
                 "dest_file": filename,
                 "from": "Pending_Approval",
                 "to": "Done",
+                "result": odoo_result,
             },
         )
 
-        # --- 9. Mark processed and confirm ---
+        # --- 10. Mark processed and confirm ---
         self._processed.add(task_id)
-        _print_task_line(task_type, task_id, filename)
+        _print_task_line(task_type, task_id, filename, odoo_result)
 
     # ------------------------------------------------------------------
     # Execution log writer
@@ -299,6 +413,7 @@ class LocalExecutor:
         task_id: str,
         task_type: str,
         timestamp: str,
+        result: str = "success",
     ) -> None:
         """
         Append one JSON record to vault/Logs/execution_log.json.
@@ -313,7 +428,8 @@ class LocalExecutor:
                 "action":    "approved_and_moved",
                 "timestamp": "<ISO-8601 UTC>",
                 "from":      "Pending_Approval",
-                "to":        "Done"
+                "to":        "Done",
+                "result":    "success" | "error: <reason>"
             }
         """
         record = {
@@ -323,6 +439,7 @@ class LocalExecutor:
             "timestamp": timestamp,
             "from":      "Pending_Approval",
             "to":        "Done",
+            "result":    result,
         }
         with self._execution_log.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -356,11 +473,12 @@ def _print_banner(
     print()
 
 
-def _print_task_line(task_type: str, task_id: str, filename: str) -> None:
-    ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+def _print_task_line(task_type: str, task_id: str, filename: str, result: str = "success") -> None:
+    ts     = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    status = "OK" if result == "success" or result.startswith("success") else "ERR"
     print(
         f"  [DONE] {ts}  type={task_type:<24}  "
-        f"id={task_id[:8]}...  -> Done/{filename}"
+        f"id={task_id[:8]}...  -> Done/{filename}  [{status}]"
     )
 
 
