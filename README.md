@@ -212,11 +212,11 @@ head -1 history/prompt_log.json | python -m json.tool
 
 | Phase | Scope | Status |
 |---|---|---|
-| **Phase 1 — Foundation** | Directory structure, spec docs, logging skeleton, README | **COMPLETE** |
-| **Phase 2 — Core Implementation** | Cloud Agent module, Local Executor module, Vault state machine | Pending |
-| **Phase 3 — Integration** | Cloud ↔ Vault ↔ Local end-to-end testing | Pending |
-| **Phase 4 — Deployment** | HuggingFace Spaces deployment, Vault sync configuration | Pending |
-| **Phase 5 — Hardening** | Security controls, sandboxing, log chain verification | Pending |
+| **Phase 1 — Foundation** | Directory structure, spec docs, SHA-256 hash-chained prompt logger, README | **COMPLETE** |
+| **Phase 2 — Core Implementation** | Cloud Agent v1.4.0, Local Executor v1.3.0, Vault state machine, Odoo integration | **COMPLETE** |
+| **Phase 3 — Integration** | Claim-by-move protocol, Gmail Watcher, Watchdog, Dashboard single-writer rule | **COMPLETE** |
+| **Phase 4 — Deployment** | Cloud daemon mode (--daemon --auto), Watchdog entry point, systemd service config | **COMPLETE** |
+| **Phase 5 — Hardening** | .gitignore security rules, secrets isolation, append-only log chain, git hygiene | **COMPLETE** |
 
 ---
 
