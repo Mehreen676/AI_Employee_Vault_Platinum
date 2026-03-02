@@ -20,7 +20,6 @@ vault/Updates/**
 vault/Deferred/**
 vault/Retry_Queue/**
 history/*.json
-Evidence/JUDGE_PROOF.md
 Dashboard.md
 
 # Briefings (generated runtime output)

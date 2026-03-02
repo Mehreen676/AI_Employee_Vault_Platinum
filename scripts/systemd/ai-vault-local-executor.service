@@ -1,5 +1,5 @@
 [Unit]
-Description=AI Employee Vault Platinum - Local Executor
+Description=AI Employee Vault Platinum - Local Executor (always-on)
 After=network.target
 
 [Service]

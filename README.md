@@ -558,6 +558,98 @@ cat vault/Logs/execution_log.json
 
 ---
 
+## Oracle Cloud VM — REAL Cloud Proof
+
+This deployment was verified live on a real Oracle Cloud Infrastructure (OCI) VM.
+No simulated environment. No localhost. SSH key-authenticated connection from Windows.
+
+### Instance Details
+
+| Field | Value |
+|---|---|
+| **Provider** | Oracle Cloud Infrastructure (OCI) |
+| **Region** | `me-dubai-1` (Middle East — Dubai) |
+| **Availability Domain** | AD-1 |
+| **Shape** | `VM.Standard.E2.1.Micro` (Always Free tier) |
+| **OS** | Canonical Ubuntu 20.04 Minimal |
+| **Username** | `ubuntu` |
+| **Public IP** | `139.185.xxx.xxx` (masked) |
+
+### SSH Connection (from Windows)
+
+```bash
+ssh -i ssh-key-2026-03-02.key ubuntu@139.185.52.137
+```
+
+---
+
+### Judge Proof Commands (Run on VM)
+
+The following commands were executed on the live Oracle Cloud VM and can be reproduced by any judge given SSH access.
+
+**1. Verify instance + uptime:**
+
+```bash
+uname -a
+uptime
+whoami
+pwd
+```
+
+**2. Verify repository is present:**
+
+```bash
+cd /home/ubuntu/AI_Employee_Vault_Platinum
+git rev-parse --short HEAD
+ls
+```
+
+**3. Run Cloud Agent in daemon mode:**
+
+```bash
+python3 cloud_agent.py --daemon --auto --interval 10
+```
+
+**4. Run Local Executor:**
+
+```bash
+python3 local_executor.py --poll 2
+```
+
+**5. Generate evidence pack:**
+
+```bash
+python3 scripts/generate_evidence_pack.py --n 20
+cat Evidence/JUDGE_PROOF.md
+```
+
+**6. Production systemd deployment (boot-persistent):**
+
+```bash
+sudo cp scripts/systemd/ai-vault-cloud-agent.service /etc/systemd/system/
+sudo cp scripts/systemd/ai-vault-local-executor.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable ai-vault-cloud-agent --now
+sudo systemctl enable ai-vault-local-executor --now
+systemctl status ai-vault-cloud-agent --no-pager
+systemctl status ai-vault-local-executor --no-pager
+journalctl -u ai-vault-cloud-agent -n 50 --no-pager
+journalctl -u ai-vault-local-executor -n 50 --no-pager
+```
+
+---
+
+### Why systemd Beats tmux/nohup as Deployment Proof
+
+- **systemd** registers services with the OS kernel — verifiable with `systemctl status` showing `Active: active (running)` and a real PID
+- **tmux/nohup** require a live terminal session — not a production mechanism and not independently verifiable
+- **Logs via journalctl** are structured, timestamped, and kernel-backed — not plain stdout files that can be fabricated
+- **`Restart=always`** means the service survives crashes, reboots, and OOM kills without human intervention
+
+The service unit files are committed to this repository at [scripts/systemd/](scripts/systemd/) and contain the exact `ExecStart` commands used on the Oracle VM.
+
+---
+
 ## Odoo Cloud Deployment
 
 ### Infrastructure Overview
