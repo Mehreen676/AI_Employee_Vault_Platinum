@@ -53,6 +53,9 @@ AI_Employee_Vault_Platinum/
 │   └── registry.py           # Tool registry — maps task types to MCP handlers
 │
 ├── scripts/                  # Operational scripts
+│   ├── systemd/                   # Production systemd unit files (Ubuntu 22.04)
+│   │   ├── ai-vault-cloud-agent.service   # Cloud Agent — always-on, auto-restart
+│   │   └── ai-vault-local-executor.service# Local Executor — always-on, auto-restart
 │   ├── generate_briefing.py       # CEO daily briefing automation
 │   ├── cleanup_old_logs.py        # 90-day audit log retention
 │   ├── generate_evidence_pack.py  # Writes Evidence/JUDGE_PROOF.md
@@ -453,6 +456,105 @@ cat Evidence/JUDGE_PROOF.md
 The file contains: UTC timestamp, pending/done task counts, last 5 execution
 log entries, last 5 prompt history entries, and an integrity statement
 referencing the SHA-256 hash chain in `history/prompt_log.json`.
+
+---
+
+## Always-On 24/7 Cloud Deployment (Platinum Tier)
+
+### Why systemd (Not tmux or nohup)
+
+| Feature | systemd | tmux / nohup |
+|---|---|---|
+| **Boot persistence** | ✅ Starts automatically on VM reboot | ❌ Requires manual restart after reboot |
+| **Auto-restart on crash** | ✅ `Restart=always` — restarts within 3 seconds | ❌ Process dies and stays dead |
+| **Structured logs** | ✅ Captured by `journald` — queryable with `journalctl` | ❌ Stdout/stderr lost or scattered |
+| **Process supervision** | ✅ Kernel-level, no parent process required | ❌ Requires tmux session to remain open |
+| **Production grade** | ✅ Standard on every Linux server | ❌ Development/demo quality only |
+
+The Platinum Tier services are packaged as proper systemd unit files in [scripts/systemd/](scripts/systemd/).
+Copy them to `/etc/systemd/system/` on any Ubuntu 22.04 VM to enable fully supervised, boot-persistent operation.
+
+---
+
+### Installation (Ubuntu 22.04 / Debian)
+
+**1. Clone the repository onto your VM:**
+
+```bash
+cd /home/ubuntu
+git clone https://github.com/Mehreen676/AI_Employee_Vault_Platinum.git
+cd AI_Employee_Vault_Platinum
+pip3 install -r requirements.txt   # if present, else skip
+cp .env.example .env               # fill in ODOO_* vars
+```
+
+**2. Copy unit files and reload systemd:**
+
+```bash
+sudo cp scripts/systemd/*.service /etc/systemd/system/
+sudo systemctl daemon-reload
+```
+
+**3. Enable services (start on boot):**
+
+```bash
+sudo systemctl enable ai-vault-cloud-agent
+sudo systemctl enable ai-vault-local-executor
+```
+
+**4. Start services now:**
+
+```bash
+sudo systemctl start ai-vault-cloud-agent
+sudo systemctl start ai-vault-local-executor
+```
+
+---
+
+### Status Checks
+
+```bash
+sudo systemctl status ai-vault-cloud-agent --no-pager
+sudo systemctl status ai-vault-local-executor --no-pager
+```
+
+Expected output includes `Active: active (running)` and the PID of the process.
+
+---
+
+### Live Logs via journalctl
+
+```bash
+# Last 50 lines of Cloud Agent output:
+journalctl -u ai-vault-cloud-agent -n 50 --no-pager
+
+# Last 50 lines of Local Executor output:
+journalctl -u ai-vault-local-executor -n 50 --no-pager
+
+# Follow live (tail -f equivalent):
+journalctl -u ai-vault-cloud-agent -f
+journalctl -u ai-vault-local-executor -f
+```
+
+---
+
+### Rate-Limit Resilience
+
+The Phase 5 rate limiter (`utils/rate_limiter.py`) persists its state to
+`vault/Logs/rate_limit_state.json` between restarts. This means:
+
+- Even if the Cloud Agent is restarted by systemd (e.g., after a crash), email
+  rate counters survive — the system does not double-send on restart.
+- Payment tasks are capped at **3/day** regardless of how many restarts occur.
+- The Local Executor's Odoo rate bucket is preserved, preventing invoice storms
+  after temporary Odoo connectivity failures.
+
+This is observable in the execution log — each record includes a timestamp and
+result, confirming that rate gates held across service lifecycle events:
+
+```bash
+cat vault/Logs/execution_log.json
+```
 
 ---
 

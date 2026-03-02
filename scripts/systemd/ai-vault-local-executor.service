@@ -1,0 +1,17 @@
+[Unit]
+Description=AI Employee Vault Platinum - Local Executor
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/AI_Employee_Vault_Platinum
+ExecStart=/usr/bin/python3 /home/ubuntu/AI_Employee_Vault_Platinum/local_executor.py --poll 2
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

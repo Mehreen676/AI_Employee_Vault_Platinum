@@ -1,0 +1,17 @@
+[Unit]
+Description=AI Employee Vault Platinum - Cloud Agent (always-on)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/AI_Employee_Vault_Platinum
+ExecStart=/usr/bin/python3 /home/ubuntu/AI_Employee_Vault_Platinum/cloud_agent.py --daemon --auto --interval 10
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
