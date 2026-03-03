@@ -975,3 +975,57 @@ for i, line in enumerate(lines):
 print('Chain intact if no KeyError above.')
 "
 ```
+
+---
+
+## Oracle Cloud VM (REAL Cloud Proof)
+
+This deployment was verified on a real Oracle Cloud Infrastructure VM.
+
+- Region: `me-dubai-1`
+- Availability Domain: `AD-1`
+- Shape: `VM.Standard.E2.1.Micro`
+- OS: `Ubuntu 20.04 Minimal`
+- Username: `ubuntu`
+- Public IP used: `139.185.xxx.xxx`
+
+SSH command:
+
+```bash
+ssh -i ssh-key-2026-03-02.key ubuntu@139.185.52.137
+```
+
+### Judge Proof Commands (Run on VM)
+
+```bash
+uname -a
+uptime
+whoami
+pwd
+cd /home/ubuntu/AI_Employee_Vault_Platinum
+git rev-parse --short HEAD
+ls
+python3 cloud_agent.py --daemon --auto --interval 10
+python3 local_executor.py --poll 2
+python3 scripts/generate_evidence_pack.py --n 20
+cat Evidence/JUDGE_PROOF.md
+```
+
+### Production systemd proof
+
+```bash
+sudo cp scripts/systemd/ai-vault-cloud-agent.service /etc/systemd/system/
+sudo cp scripts/systemd/ai-vault-local-executor.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now ai-vault-cloud-agent.service
+sudo systemctl enable --now ai-vault-local-executor.service
+systemctl status ai-vault-cloud-agent.service --no-pager
+systemctl status ai-vault-local-executor.service --no-pager
+journalctl -u ai-vault-cloud-agent.service -n 50 --no-pager
+journalctl -u ai-vault-local-executor.service -n 50 --no-pager
+```
+
+Why systemd is preferred over tmux/nohup:
+- Boot persistence: services start on reboot automatically.
+- Auto-restart: `Restart=always` recovers from crashes without operator action.
+- Verifiable evidence: `systemctl status` and `journalctl` provide auditable OS-level proof.

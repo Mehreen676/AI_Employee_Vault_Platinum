@@ -1,225 +1,240 @@
 """
-HITL Approval CLI — Gold Tier.
+AI Employee Vault - Platinum Tier
+HITL Approval CLI
 
-Manages files in Pending_Approval/, Approved/, and Rejected/.
+True HITL gate:
+    vault/Waiting_Approval/ -> vault/Pending_Approval/ (approve)
+    vault/Waiting_Approval/ -> vault/Rejected/         (reject)
 
 Usage:
-  python approve.py                               # list all pending HITL requests
-  python approve.py <hitl_filename.md>            # approve one file
-  python approve.py --all                         # approve all pending
-  python approve.py --reject <hitl_filename.md>   # reject one file
-  python approve.py --reject --all                # reject all pending
-  python approve.py --reject <filename> --reason "Too risky"
-
-How the pipeline works:
-  Pending_Approval/hitl_*.md  ← approval request (YAML frontmatter)
-  Pending_Approval/<task>.md  ← original task held here
-
-  approve.py approve  -> moves hitl file to Approved/   -> agent resumes task
-  approve.py reject   -> moves hitl file to Rejected/   -> agent archives task
+    python approve.py list
+    python approve.py approve <task_file_or_id>
+    python approve.py reject <task_file_or_id> [reason]
+    python approve.py status
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+import argparse
+import json
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 
-from mcp_file_ops import list_tasks
-
-BASE_DIR = Path(__file__).resolve().parent
-PENDING = BASE_DIR / "Pending_Approval"
-APPROVED = BASE_DIR / "Approved"
-REJECTED = BASE_DIR / "Rejected"
-RUN_LOG = BASE_DIR / "run_log.md"
-
-
-def utc_ts() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+PROJECT_ROOT = Path(__file__).resolve().parent
+VAULT_ROOT = PROJECT_ROOT / "vault"
+WAITING_DIR = VAULT_ROOT / "Waiting_Approval"
+PENDING_DIR = VAULT_ROOT / "Pending_Approval"
+REJECTED_DIR = VAULT_ROOT / "Rejected"
+DONE_DIR = VAULT_ROOT / "Done"
+LOGS_DIR = VAULT_ROOT / "Logs"
+APPROVAL_LOG = LOGS_DIR / "approval_log.json"
 
 
-def append_log(text: str) -> None:
-    RUN_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(RUN_LOG, "a", encoding="utf-8") as f:
-        f.write(text)
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def list_hitl_pending() -> list[str]:
-    """Return sorted list of hitl_*.md files in Pending_Approval/."""
-    PENDING.mkdir(parents=True, exist_ok=True)
-    return sorted(f.name for f in PENDING.glob("hitl_*.md"))
+def _ensure_dirs() -> None:
+    for path in (WAITING_DIR, PENDING_DIR, REJECTED_DIR, DONE_DIR, LOGS_DIR):
+        path.mkdir(parents=True, exist_ok=True)
 
 
-def _update_status_in_content(content: str, new_status: str, reason: str = "") -> str:
-    """Replace status: value in YAML frontmatter block."""
-    lines = content.split("\n")
-    result = []
-    in_front = False
-    status_replaced = False
-    for i, line in enumerate(lines):
-        if i == 0 and line.strip() == "---":
-            in_front = True
-            result.append(line)
-            continue
-        if in_front and line.strip() == "---":
-            # Inject rejection_reason before closing --- if rejecting
-            if reason and new_status == "rejected":
-                result.append(f'rejection_reason: "{reason}"')
-            in_front = False
-            result.append(line)
-            continue
-        if in_front and line.startswith("status:") and not status_replaced:
-            result.append(f"status: {new_status}")
-            status_replaced = True
-            continue
-        result.append(line)
-    return "\n".join(result)
+def _append_log(action: str, task_file: str, task_id: str, task_type: str, reason: str = "") -> None:
+    record = {
+        "timestamp": _utc_now(),
+        "action": action,
+        "task_file": task_file,
+        "task_id": task_id,
+        "task_type": task_type,
+        "reason": reason,
+    }
+    with APPROVAL_LOG.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
-def approve_file(filename: str) -> bool:
-    """Move a hitl file from Pending_Approval/ to Approved/."""
-    src = PENDING / filename
-    if not src.exists():
-        print(f"  Not found in Pending_Approval/: {filename}")
-        return False
-
-    if not filename.startswith("hitl_"):
-        print(f"  Skipping non-HITL file: {filename} (must start with hitl_)")
-        return False
-
-    APPROVED.mkdir(parents=True, exist_ok=True)
-    dst = APPROVED / filename
-
-    # Update status in file content before moving
+def _read_manifest(path: Path) -> dict:
     try:
-        content = src.read_text(encoding="utf-8")
-        updated = _update_status_in_content(content, "approved")
-        dst.write_text(updated, encoding="utf-8")
-        src.unlink()
-    except Exception as e:
-        print(f"  Error moving {filename}: {e}")
-        return False
-
-    append_log(f"{utc_ts()} - HITL Approved: {filename} -> Approved/\n")
-    print(f"  Approved: {filename} -> Approved/")
-    print(f"  Next: run 'python gold_agent.py' to process the approved task.")
-    return True
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
-def reject_file(filename: str, reason: str = "") -> bool:
-    """Move a hitl file from Pending_Approval/ to Rejected/."""
-    src = PENDING / filename
-    if not src.exists():
-        print(f"  Not found in Pending_Approval/: {filename}")
-        return False
+def _list_waiting() -> list[Path]:
+    return sorted(WAITING_DIR.glob("task_*.json"))
 
-    if not filename.startswith("hitl_"):
-        print(f"  Skipping non-HITL file: {filename} (must start with hitl_)")
-        return False
 
-    REJECTED.mkdir(parents=True, exist_ok=True)
-    dst = REJECTED / filename
+def _resolve_waiting_target(task_file_or_id: str) -> Path | None:
+    direct = WAITING_DIR / task_file_or_id
+    if direct.exists():
+        return direct
 
-    reason_text = reason or "No reason provided"
+    # Accept raw UUID -> task_<uuid>.json
+    by_uuid = WAITING_DIR / f"task_{task_file_or_id}.json"
+    if by_uuid.exists():
+        return by_uuid
+
+    # Accept short-id search against manifest id field
+    needle = task_file_or_id.strip().lower()
+    for path in _list_waiting():
+        manifest = _read_manifest(path)
+        task_id = str(manifest.get("id", "")).lower()
+        if task_id.startswith(needle):
+            return path
+    return None
+
+
+def cmd_list() -> int:
+    waiting = _list_waiting()
+    if not waiting:
+        print("[approve] No tasks in vault/Waiting_Approval/.")
+        return 0
+
+    print(f"[approve] Waiting tasks: {len(waiting)}")
+    for path in waiting:
+        manifest = _read_manifest(path)
+        task_id = str(manifest.get("id", "unknown"))
+        task_type = str(manifest.get("task_type", "unknown"))
+        created = str(manifest.get("created_at", "?"))
+        print(f"  - {path.name}  id={task_id[:8]}...  type={task_type}  created={created}")
+    return 0
+
+
+def cmd_status() -> int:
+    waiting = len(list(WAITING_DIR.glob("task_*.json")))
+    pending = len(list(PENDING_DIR.glob("task_*.json")))
+    done = len(list(DONE_DIR.glob("task_*.json")))
+    rejected = len(list(REJECTED_DIR.glob("task_*.json")))
+
+    print("[approve] Queue Status")
+    print(f"  Waiting_Approval : {waiting}")
+    print(f"  Pending_Approval : {pending}")
+    print(f"  Done             : {done}")
+    print(f"  Rejected         : {rejected}")
+    return 0
+
+
+def cmd_approve(task_file_or_id: str) -> int:
+    src = _resolve_waiting_target(task_file_or_id)
+    if src is None:
+        print(f"[approve] Not found in Waiting_Approval: {task_file_or_id}")
+        return 1
+
+    dest = PENDING_DIR / src.name
+    if dest.exists():
+        print(f"[approve] Destination already exists: {dest.name}")
+        return 1
+
+    manifest = _read_manifest(src)
+    task_id = str(manifest.get("id", "unknown"))
+    task_type = str(manifest.get("task_type", "unknown"))
 
     try:
-        content = src.read_text(encoding="utf-8")
-        updated = _update_status_in_content(content, "rejected", reason=reason_text)
-        dst.write_text(updated, encoding="utf-8")
-        src.unlink()
-    except Exception as e:
-        print(f"  Error moving {filename}: {e}")
-        return False
+        src.rename(dest)  # atomic move on same filesystem
+    except OSError as exc:
+        print(f"[approve] Move failed: {exc}")
+        return 1
 
-    append_log(f"{utc_ts()} - HITL Rejected: {filename} -> Rejected/ | reason={reason_text}\n")
-    print(f"  Rejected: {filename} -> Rejected/ (reason: {reason_text})")
-    print(f"  Next: run 'python gold_agent.py' to archive the rejected task.")
-    return True
+    _append_log(
+        action="approved_waiting_to_pending",
+        task_file=src.name,
+        task_id=task_id,
+        task_type=task_type,
+    )
+    print(
+        f"[approve] APPROVED {src.name} -> vault/Pending_Approval/ "
+        f"(id={task_id[:8]}..., type={task_type})"
+    )
+    return 0
 
 
-def show_pending() -> None:
-    """Print all pending HITL requests with a summary."""
-    pending = list_hitl_pending()
-    if not pending:
-        print("No HITL approval requests pending.")
-        return
+def cmd_reject(task_file_or_id: str, reason: str = "") -> int:
+    src = _resolve_waiting_target(task_file_or_id)
+    if src is None:
+        print(f"[approve] Not found in Waiting_Approval: {task_file_or_id}")
+        return 1
 
-    print(f"Pending HITL approval requests ({len(pending)}):\n")
-    for name in pending:
-        path = PENDING / name
+    dest = REJECTED_DIR / src.name
+    if dest.exists():
+        print(f"[approve] Destination already exists: {dest.name}")
+        return 1
+
+    manifest = _read_manifest(src)
+    task_id = str(manifest.get("id", "unknown"))
+    task_type = str(manifest.get("task_type", "unknown"))
+
+    # Preserve JSON and annotate rejection metadata for audit readability.
+    if manifest:
+        manifest["status"] = "rejected"
+        manifest["rejected_at"] = _utc_now()
+        if reason:
+            manifest["rejection_reason"] = reason
+        tmp = REJECTED_DIR / (src.name + ".tmp")
+        tmp.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
         try:
-            content = path.read_text(encoding="utf-8")
-            # Quick extract of action and task_file from frontmatter
-            action = ""
-            task_file = ""
-            for line in content.split("\n")[1:]:
-                if line.strip() == "---":
-                    break
-                if line.startswith("action:"):
-                    action = line.split(":", 1)[1].strip()
-                if line.startswith("task_file:"):
-                    task_file = line.split(":", 1)[1].strip()
-            print(f"  {name}")
-            print(f"    action={action}  task={task_file}")
-        except Exception:
-            print(f"  {name}")
-
-    print(f"\nApprove:  python approve.py <filename>")
-    print(f"Reject:   python approve.py --reject <filename> [--reason \"text\"]")
-    print(f"All:      python approve.py --all  |  python approve.py --reject --all")
-
-
-def main() -> None:
-    PENDING.mkdir(parents=True, exist_ok=True)
-    APPROVED.mkdir(parents=True, exist_ok=True)
-    REJECTED.mkdir(parents=True, exist_ok=True)
-
-    args = sys.argv[1:]
-
-    # No args — list mode
-    if not args:
-        show_pending()
-        return
-
-    # Parse flags
-    is_reject = "--reject" in args
-    is_all = "--all" in args
-    reason = ""
-    if "--reason" in args:
-        idx = args.index("--reason")
-        if idx + 1 < len(args):
-            reason = args[idx + 1]
-
-    # Strip flags to get filename(s)
-    filename_args = [
-        a for a in args
-        if not a.startswith("--") and a != reason
-    ]
-    filename = filename_args[0] if filename_args else ""
-
-    pending = list_hitl_pending()
-
-    if is_all:
-        if not pending:
-            print("No HITL requests pending.")
-            return
-        action_fn = reject_file if is_reject else approve_file
-        for name in pending:
-            if is_reject:
-                action_fn(name, reason)
-            else:
-                action_fn(name)
-        return
-
-    if not filename:
-        show_pending()
-        return
-
-    if is_reject:
-        reject_file(filename, reason)
+            src.unlink()
+            tmp.rename(dest)
+        except OSError as exc:
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
+            print(f"[approve] Reject move failed: {exc}")
+            return 1
     else:
-        approve_file(filename)
+        try:
+            src.rename(dest)  # atomic move fallback
+        except OSError as exc:
+            print(f"[approve] Reject move failed: {exc}")
+            return 1
+
+    _append_log(
+        action="rejected_waiting_to_rejected",
+        task_file=src.name,
+        task_id=task_id,
+        task_type=task_type,
+        reason=reason,
+    )
+    reason_text = f" | reason={reason}" if reason else ""
+    print(
+        f"[approve] REJECTED {src.name} -> vault/Rejected/ "
+        f"(id={task_id[:8]}..., type={task_type}){reason_text}"
+    )
+    return 0
+
+
+def main() -> int:
+    _ensure_dirs()
+
+    parser = argparse.ArgumentParser(
+        prog="approve",
+        description="HITL gate CLI for Waiting_Approval -> Pending_Approval/Rejected.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("list", help="List tasks in vault/Waiting_Approval/.")
+    sub.add_parser("status", help="Show queue counts.")
+
+    p_approve = sub.add_parser("approve", help="Approve one task into Pending_Approval.")
+    p_approve.add_argument("task_file_or_id", help="task_<uuid>.json, full UUID, or short task id prefix")
+
+    p_reject = sub.add_parser("reject", help="Reject one task into Rejected.")
+    p_reject.add_argument("task_file_or_id", help="task_<uuid>.json, full UUID, or short task id prefix")
+    p_reject.add_argument("reason", nargs="?", default="", help="Optional rejection reason")
+
+    args = parser.parse_args()
+
+    if args.command == "list":
+        return cmd_list()
+    if args.command == "status":
+        return cmd_status()
+    if args.command == "approve":
+        return cmd_approve(args.task_file_or_id)
+    if args.command == "reject":
+        return cmd_reject(args.task_file_or_id, args.reason)
+
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
