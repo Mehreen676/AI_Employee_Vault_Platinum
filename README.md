@@ -246,6 +246,16 @@ All contributions must follow the spec-driven development protocol:
 
 ## Judge Verification – Platinum Tier
 
+## 🚀 Quick Judge Run (3 Commands)
+
+For fast evaluation, judges can verify the full distributed pipeline using only three commands:
+
+```bash
+python watchdog.py --start-all --interval 10
+python scripts/generate_evidence_pack.py --n 20
+cat Evidence/JUDGE_PROOF.md
+```
+
 > This section provides a structured explanation of the Platinum Tier architecture for independent verification, audit review, or hackathon judging.
 
 ---
