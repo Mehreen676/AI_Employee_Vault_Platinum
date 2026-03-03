@@ -1,5 +1,5 @@
 """
-AI Employee Vault – Platinum Tier
+AI Employee Vault - Platinum Tier
 Root-level Local Executor entry point.
 
 Usage:
@@ -29,7 +29,9 @@ _ROOT = Path(__file__).resolve().parent
 # ---------------------------------------------------------------------------
 
 for _dir in [
+    "vault/Waiting_Approval",
     "vault/Pending_Approval",
+    "vault/Rejected",
     "vault/Approved",
     "vault/Done",
     "vault/Logs",
@@ -65,7 +67,7 @@ if not _executor_path.exists():
     sys.exit(1)
 
 _spec = importlib.util.spec_from_file_location("__main__", _executor_path)
-_mod  = importlib.util.module_from_spec(_spec)
+_mod = importlib.util.module_from_spec(_spec)
 
 # Set __file__ so that _PROJECT_ROOT resolution inside executor.py is correct.
 _mod.__file__ = str(_executor_path)

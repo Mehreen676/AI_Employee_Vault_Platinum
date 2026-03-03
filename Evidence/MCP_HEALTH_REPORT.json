@@ -1,0 +1,29 @@
+{
+  "generated": "2026-03-03T08:23:23Z",
+  "mcp_dry_run": "true (default \u2014 not explicitly set)",
+  "registered_tools": {
+    "total": 0,
+    "tools": {},
+    "by_server": {}
+  },
+  "last_log_timestamp": "2026-02-27T04:50:21.301159+00:00",
+  "log_stats": {
+    "total_log_entries": 5450,
+    "entries_by_server": {
+      "mcp_file_ops": 3028,
+      "gold_agent": 873,
+      "mcp_audit_ops": 648,
+      "mcp_calendar_ops": 432,
+      "domain_router": 225,
+      "ceo_briefing": 216,
+      "mcp_router": 14,
+      "social_mcp_stub": 8,
+      "odoo_mcp_stub": 6
+    }
+  },
+  "health_status": "DEGRADED",
+  "source": {
+    "registry_file": "Evidence\\REGISTERED_MCP_TOOLS.json",
+    "logs_dir": "Logs"
+  }
+}

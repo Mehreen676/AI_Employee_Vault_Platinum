@@ -17,7 +17,8 @@ Changes in v1.3.0:
     - New vault directories managed: In_Progress/local/ (created on init).
 
 Responsibility:
-    Watches vault/Pending_Approval/ for task manifest files.
+    Watches ONLY vault/Pending_Approval/ (post-HITL approved queue)
+    for task manifest files.
     For each manifest found:
         1. Reads and parses the JSON manifest.
         2. Guards against replay within the current session.
@@ -33,9 +34,9 @@ Responsibility:
        10. Writes Dashboard.md (single-writer rule).
        11. Prints a confirmation line to stdout.
 
-    NOTE: In this phase the executor auto-approves tasks from Pending_Approval/
-    directly. In Phase 3, a human approval UI will be inserted between
-    Pending_Approval/ and Approved/ before this executor picks up the task.
+    The human approval gate is enforced upstream:
+        Waiting_Approval/ -> Pending_Approval/ via approve.py.
+    Local Executor never reads Waiting_Approval/.
 
 CLI Usage (from project root):
     python -m local_executor.executor --poll 2
@@ -513,7 +514,7 @@ class LocalExecutor:
         # --- 10. Log completion ---
         self._logger.log(
             event_type=EventType.TASK_COMPLETED,
-            summary=f"Task approved and moved to Done/: [{task_type}]",
+            summary=f"Task executed and moved to Done/: [{task_type}]",
             detail=f"File: {filename} | via=In_Progress/local | result={odoo_result}",
             task_id=task_id,
             metadata_extra={

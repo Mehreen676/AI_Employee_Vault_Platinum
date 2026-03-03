@@ -14,14 +14,15 @@ Changes in v1.4.0:
       appends status updates to vault/Updates/cloud_updates.md. Local Executor
       owns Dashboard.md exclusively.
     - Enhanced heartbeat: HEALTH_CHECK events now include alive=True,
-      task_count (cumulative tasks submitted this session), and pending_count
-      (current count of .json files in vault/Pending_Approval/).
+      task_count (cumulative tasks submitted this session), waiting_count
+      (current count of .json files in vault/Waiting_Approval/), and
+      pending_count (current count of .json files in vault/Pending_Approval/).
     - New vault directories managed: Needs_Action/email/, In_Progress/cloud/,
       Updates/. All are created on first access.
 
 Responsibility:
     Accepts task specifications and writes structured task manifests to
-    vault/Pending_Approval/ using atomic file operations.
+    vault/Waiting_Approval/ using atomic file operations.
 
     Supports three operating modes:
         Single-shot   — Submit one task programmatically via submit_task().
@@ -106,6 +107,7 @@ Component    = _pl_mod.Component
 # ---------------------------------------------------------------------------
 
 _VAULT_ROOT    = _PROJECT_ROOT / "vault"
+_VAULT_WAITING = _VAULT_ROOT / "Waiting_Approval"
 _VAULT_PENDING = _VAULT_ROOT / "Pending_Approval"
 
 # ---------------------------------------------------------------------------
@@ -199,7 +201,7 @@ class CloudAgent:
     Cognitive core of the Platinum Tier system.
 
     Generates task manifests from task specifications and writes them
-    atomically to vault/Pending_Approval/. Every action is logged through
+    atomically to vault/Waiting_Approval/. Every action is logged through
     PromptLogger and appended to history/prompt_log.json.
 
     This class does NOT execute tasks. Execution is the exclusive domain
@@ -218,6 +220,7 @@ class CloudAgent:
         vault_root = Path(vault_path) if vault_path else _VAULT_ROOT
 
         # Core vault paths
+        self._waiting           = vault_root / "Waiting_Approval"
         self._pending           = vault_root / "Pending_Approval"
         self._needs_action      = vault_root / "Needs_Action"
         self._in_progress_cloud = vault_root / "In_Progress" / "cloud"
@@ -226,6 +229,7 @@ class CloudAgent:
 
         # Ensure all vault directories exist before anything else.
         for _dir in [
+            self._waiting,
             self._pending,
             self._needs_action / "email",
             self._in_progress_cloud,
@@ -239,6 +243,7 @@ class CloudAgent:
             event_type=EventType.SYSTEM_STARTUP,
             summary="Cloud Agent initialised (v1.4.0)",
             detail=(
+                f"Vault Waiting_Approval: {self._waiting} | "
                 f"Vault Pending_Approval: {self._pending} | "
                 f"Needs_Action: {self._needs_action} | "
                 f"In_Progress/cloud: {self._in_progress_cloud} | "
@@ -281,16 +286,16 @@ class CloudAgent:
         Return (task_id, final_path) guaranteed not to exist.
 
         Generates a new UUID until the target filename is absent from
-        vault/Pending_Approval/, providing lightweight write-lock semantics.
+        vault/Waiting_Approval/, providing lightweight write-lock semantics.
         """
         for _ in range(10):
             task_id    = str(uuid.uuid4())
-            final_path = self._pending / f"task_{task_id}.json"
+            final_path = self._waiting / f"task_{task_id}.json"
             if not final_path.exists():
                 return task_id, final_path
         # Extremely unlikely; last resort
         task_id = str(uuid.uuid4())
-        return task_id, self._pending / f"task_{task_id}.json"
+        return task_id, self._waiting / f"task_{task_id}.json"
 
     def _claim_from_needs_action(self) -> Optional[Path]:
         """
@@ -331,7 +336,7 @@ class CloudAgent:
 
         Reads the file, parses YAML frontmatter if present (.md files written
         by Gmail watcher), extracts metadata (type, from, subject), then
-        submits one task manifest to vault/Pending_Approval/.
+        submits one task manifest to vault/Waiting_Approval/.
 
         Returns:
             task_id string on success, None on failure.
@@ -374,7 +379,7 @@ class CloudAgent:
 
         self._logger.log(
             event_type=EventType.TASK_SUBMITTED,
-            summary=f"Claimed task submitted to Pending_Approval/: [{task_type}]",
+            summary=f"Claimed task submitted to Waiting_Approval/: [{task_type}]",
             detail=(
                 f"Source file: {claimed_path.name} | "
                 f"task_id={task_id} | "
@@ -403,13 +408,14 @@ class CloudAgent:
         Local Executor reads cloud_updates.md and merges it into Dashboard.md.
         """
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        waiting_count = len(list(self._waiting.glob("task_*.json")))
         pending_count = len(list(self._pending.glob("task_*.json")))
 
         lines = [
             f"",
             f"## Cloud Agent Update — {now}",
             f"- Cycle: {cycle} | Tasks submitted (session): {task_count} "
-            f"| Pending in vault: {pending_count}",
+            f"| Waiting approval: {waiting_count} | Pending execution: {pending_count}",
         ]
         if last_task_type and last_task_id:
             lines.append(
@@ -436,7 +442,7 @@ class CloudAgent:
         zone: Optional[str] = None,
     ) -> str:
         """
-        Create one task manifest and write it to vault/Pending_Approval/.
+        Create one task manifest and write it to vault/Waiting_Approval/.
 
         Manifest schema (Platinum Tier v1.2):
             {
@@ -476,7 +482,7 @@ class CloudAgent:
         }
 
         filename = final_path.name
-        tmp_path = self._pending / (filename + ".tmp")
+        tmp_path = self._waiting / (filename + ".tmp")
 
         if _DRY_RUN:
             # DRY_RUN: log intent only — no files written to vault.
@@ -499,7 +505,7 @@ class CloudAgent:
 
         self._logger.log(
             event_type=EventType.TASK_SUBMITTED,
-            summary=f"Task submitted to Vault: [{task_type}] zone={effective_zone}",
+            summary=f"Task submitted to Waiting_Approval/: [{task_type}] zone={effective_zone}",
             detail=(
                 f"File: {filename} | "
                 f"Content preview: {content[:120]}"
@@ -593,7 +599,7 @@ class CloudAgent:
 
         Every cycle:
             1. Emits a HEALTH_CHECK heartbeat log entry with alive, task_count,
-               and pending_count fields for watchdog monitoring.
+               waiting_count, and pending_count fields for watchdog monitoring.
             2. Tries to claim one file from vault/Needs_Action/ (claim-by-move).
             3. If auto=True and no Needs_Action file, generates a new task.
             4. Appends a status update to vault/Updates/cloud_updates.md.
@@ -632,6 +638,7 @@ class CloudAgent:
             while True:
                 cycle_count  += 1
                 now           = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+                waiting_count = len(list(self._waiting.glob("task_*.json")))
                 pending_count = len(list(self._pending.glob("task_*.json")))
 
                 # --- Enhanced heartbeat (v1.4.0) ---
@@ -643,6 +650,7 @@ class CloudAgent:
                         f"auto={auto} | "
                         f"interval={interval}s | "
                         f"task_count={task_count} | "
+                        f"waiting_count={waiting_count} | "
                         f"pending_count={pending_count}"
                     ),
                     metadata_extra={
@@ -651,10 +659,11 @@ class CloudAgent:
                         "auto":          auto,
                         "alive":         True,
                         "task_count":    task_count,
+                        "waiting_count": waiting_count,
                         "pending_count": pending_count,
                     },
                 )
-                _print_heartbeat(cycle_count, now, task_count, pending_count)
+                _print_heartbeat(cycle_count, now, task_count, waiting_count, pending_count)
 
                 # --- Claim from Needs_Action first (claim-by-move) ---
                 claimed = self._claim_from_needs_action()
@@ -701,13 +710,13 @@ class CloudAgent:
 
     def list_pending(self) -> list[dict]:
         """
-        Return all task manifests currently in vault/Pending_Approval/.
+        Return all task manifests currently in vault/Waiting_Approval/.
 
         Returns:
             List of manifest dicts, sorted by filename.
         """
         manifests = []
-        for path in sorted(self._pending.glob("task_*.json")):
+        for path in sorted(self._waiting.glob("task_*.json")):
             try:
                 manifests.append(json.loads(path.read_text(encoding="utf-8")))
             except (json.JSONDecodeError, OSError):
@@ -748,7 +757,7 @@ def _print_banner(
     print(f"  Zones        : {', '.join(_ZONES)}")
     print(f"  Needs_Action : vault/Needs_Action/ (claim-by-move)")
     print(f"  In_Progress  : vault/In_Progress/cloud/")
-    print(f"  Destination  : vault/Pending_Approval/task_<uuid>.json")
+    print(f"  Destination  : vault/Waiting_Approval/task_<uuid>.json")
     print(f"  Updates      : vault/Updates/cloud_updates.md")
     print(f"  Logging      : history/prompt_log.json")
     print("=" * 66)
@@ -760,11 +769,12 @@ def _print_heartbeat(
     cycle: int,
     timestamp: str,
     task_count: int,
+    waiting_count: int,
     pending_count: int,
 ) -> None:
     print(
         f"  [HB #{cycle:04d}] {timestamp[:19]}Z  "
-        f"alive=True  tasks={task_count}  pending={pending_count}"
+        f"alive=True  tasks={task_count}  waiting={waiting_count}  pending={pending_count}"
     )
 
 
@@ -782,7 +792,7 @@ if __name__ == "__main__":
         prog="cloud_agent.agent",
         description=(
             "AI Employee Vault - Platinum Tier: Cloud Agent v1.4.0.\n"
-            "Generates task manifests in vault/Pending_Approval/.\n"
+            "Generates task manifests in vault/Waiting_Approval/.\n"
             "Claims items from vault/Needs_Action/ (claim-by-move).\n\n"
             "Modes:\n"
             "  --auto            continuous task generation\n"
