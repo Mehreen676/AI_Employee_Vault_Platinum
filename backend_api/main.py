@@ -66,14 +66,40 @@ QUEUE_DIRS: dict[str, Path] = {
     "rejected":         QUEUE_DIR / "Rejected",
 }
 
-# Human-readable directory names accepted by POST /queue/enqueue
-_ENQUEUE_QUEUE_MAP: dict[str, Path] = {
-    "Needs_Action":     QUEUE_DIR / "Needs_Action",
-    "Waiting_Approval": QUEUE_DIR / "Waiting_Approval",
-    "Pending_Approval": QUEUE_DIR / "Pending_Approval",
-    "Done":             QUEUE_DIR / "Done",
-    "Retry":            QUEUE_DIR / "Retry",
+# Lowercase alias → canonical disk folder name.
+# Used by _resolve_enqueue_dir() so POST /queue/enqueue accepts any
+# capitalisation or legacy alias (e.g. retry_queue, NEEDS_ACTION).
+_QUEUE_ALIASES: dict[str, str] = {
+    "needs_action":     "Needs_Action",
+    "waiting_approval": "Waiting_Approval",
+    "pending_approval": "Pending_Approval",
+    "approved":         "Approved",
+    "done":             "Done",
+    "retry":            "Retry",
+    "retry_queue":      "Retry",   # legacy alias
 }
+
+
+def _resolve_enqueue_dir(queue_name: str) -> Path:
+    """
+    Map any supported queue name spelling to its QUEUE_DIR sub-directory.
+
+    Normalises *queue_name* to lowercase before lookup, so all of these
+    resolve to the same path:
+        needs_action / Needs_Action / NEEDS_ACTION
+        retry / Retry / retry_queue / Retry_Queue
+
+    Raises HTTPException 400 if the name is not recognised.
+    """
+    key    = queue_name.lower()
+    folder = _QUEUE_ALIASES.get(key)
+    if folder is None:
+        valid = ", ".join(sorted(set(_QUEUE_ALIASES)))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid queue '{queue_name}'. Accepted (case-insensitive): {valid}",
+        )
+    return QUEUE_DIR / folder
 
 # ── App setup ─────────────────────────────────────────────────────────────────
 
@@ -365,22 +391,17 @@ def enqueue_task(body: EnqueueRequest):
     """
     Write a real task JSON file into the specified queue directory.
 
-    ``queue`` must be one of:
-    Needs_Action | Waiting_Approval | Pending_Approval | Done | Retry
+    ``queue`` is case-insensitive and accepts any of these spellings:
+    needs_action / Needs_Action / NEEDS_ACTION
+    waiting_approval / Waiting_Approval
+    pending_approval / Pending_Approval
+    done / Done
+    retry / Retry / retry_queue / Retry_Queue
 
     The file is written to VAULT_DIR/Queue/<queue>/<timestamp>_<uuid>.json.
     Returns { ok, file_path, vault_dir }.
     """
-    if body.queue not in _ENQUEUE_QUEUE_MAP:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Invalid queue '{body.queue}'. "
-                f"Valid values: {', '.join(_ENQUEUE_QUEUE_MAP)}"
-            ),
-        )
-
-    dest_dir = _ENQUEUE_QUEUE_MAP[body.queue]
+    dest_dir = _resolve_enqueue_dir(body.queue)   # raises 400 on bad name
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
