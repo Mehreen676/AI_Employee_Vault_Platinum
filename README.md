@@ -54,7 +54,29 @@ This is not a demo. This is a production-class distributed system designed for o
 
 ---
 
-## System Architecture
+## Platinum System Architecture
+
+![Platinum Architecture](Evidence/PLATINUM_ARCHITECTURE_V2.png)
+
+> Full diagram source + Mermaid version: [Evidence/PLATINUM_ARCHITECTURE_V2.md](Evidence/PLATINUM_ARCHITECTURE_V2.md)
+>
+> Regenerate: `python tools/generate_architecture_v2.py`
+
+The Platinum Tier is a **fully distributed, 7-layer AI pipeline**:
+
+| Layer | Badge | Colour | Role |
+|---|---|---|---|
+| Input | `[IN]` | Blue | Gmail Watcher + Manual Drop → Needs_Action Queue |
+| Cloud AI | `[AI]` | Green | Cloud Agent v1.4.0 — task planning, prompt generation |
+| Human-in-the-Loop | `[HUMAN]` | Purple | HITL Gate — approval required before execution |
+| Local Execution | `[RUN]` | Teal | Local Executor + 5 MCP tools (Email/Cal/File/Social/Odoo) |
+| Vault State Machine | `[VAULT]` | Orange | Pending_Approval → Approved → Done / Retry_Queue |
+| Output & Reporting | `[OUT]` | Magenta | Execution Logs, Evidence Pack, CEO Briefing |
+| System Services | `[SVC]` | Slate | Watchdog, Rate Limiter, Retry Logic, SHA-256 Prompt Logger |
+
+---
+
+## System Architecture (Mermaid)
 
 The Platinum Tier is a **fully distributed, multi-layer AI pipeline** with strict separation of concerns between cloud intelligence, human approval, and local execution.
 
