@@ -75,6 +75,40 @@ app.add_middleware(
 )
 
 
+# ── Startup initialisation ────────────────────────────────────────────────────
+
+@app.on_event("startup")
+def _startup_init() -> None:
+    """
+    Best-effort directory and seed-file creation at server start.
+
+    HuggingFace Spaces: /app is read-only, /tmp is writable.
+    All OSError exceptions are silently swallowed so the server always starts.
+    """
+    # Evidence dir — env-overridable, defaults to /tmp/evidence (writable on HF)
+    try:
+        EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+
+    # Vault layout — succeeds locally; silently skipped on HF's read-only /app
+    for _sub in ("Logs", "Queue"):
+        try:
+            (VAULT_DIR / _sub).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+
+    # Seed empty log files so log endpoints never 404 on a fresh instance
+    _log_dir = VAULT_DIR / "Logs"
+    for _fname in ("execution_log.json", "prompt_chain.json", "health_log.json"):
+        _fpath = _log_dir / _fname
+        try:
+            if not _fpath.exists():
+                _fpath.write_text("", encoding="utf-8")
+        except OSError:
+            pass
+
+
 # ── Root ──────────────────────────────────────────────────────────────────────
 
 @app.get("/")
