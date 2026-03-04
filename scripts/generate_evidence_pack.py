@@ -79,9 +79,11 @@ Component    = _pl_mod.Component
 
 _PENDING_DIR    = _PROJECT_ROOT / "vault" / "Pending_Approval"
 _DONE_DIR       = _PROJECT_ROOT / "vault" / "Done"
-_EXEC_LOG       = _PROJECT_ROOT / "vault" / "Logs" / "execution_log.json"
-_PROMPT_LOG     = _PROJECT_ROOT / "history" / "prompt_log.json"
-_EVIDENCE_DIR   = Path(os.environ.get("EVIDENCE_OUT_DIR", "/tmp/evidence"))
+# Log files live in the writable log dir (env-overridable; default /tmp on HF)
+_LOG_DIR        = Path(os.environ.get("VAULT_LOG_DIR",  "/tmp/vault/Logs"))
+_EXEC_LOG       = _LOG_DIR / "execution_log.json"
+_PROMPT_LOG     = Path(os.environ.get("PROMPT_LOG_PATH", str(_LOG_DIR / "prompt_chain.json")))
+_EVIDENCE_DIR   = Path(os.environ.get("EVIDENCE_OUT_DIR", "/tmp/Evidence"))
 os.makedirs(_EVIDENCE_DIR, exist_ok=True)
 _OUTPUT_FILE    = _EVIDENCE_DIR / "JUDGE_PROOF.md"
 

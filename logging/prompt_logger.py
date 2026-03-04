@@ -65,7 +65,13 @@ from typing import Optional
 SCHEMA_VERSION = "1.0.0"
 LOGGER_VERSION = "1.0.0"
 GENESIS_HASH = "genesis"
-DEFAULT_LOG_PATH = Path(__file__).parent.parent / "history" / "prompt_log.json"
+# On HuggingFace Spaces /app is read-only; use PROMPT_LOG_PATH env var to redirect.
+DEFAULT_LOG_PATH = Path(
+    os.environ.get(
+        "PROMPT_LOG_PATH",
+        "/tmp/vault/Logs/prompt_chain.json",
+    )
+)
 
 
 # ---------------------------------------------------------------------------

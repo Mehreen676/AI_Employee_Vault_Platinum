@@ -31,7 +31,9 @@ VERSION = "1.0.0"
 _HERE       = Path(__file__).resolve().parent
 VAULT_ROOT  = Path(os.getenv("VAULT_ROOT", str(_HERE.parent)))
 VAULT_DIR   = VAULT_ROOT / "vault"
-EVIDENCE_DIR = Path(os.getenv("EVIDENCE_OUT_DIR", "/tmp/evidence"))
+# On HuggingFace Spaces /app is read-only; writable paths live under /tmp
+EVIDENCE_DIR = Path(os.getenv("EVIDENCE_OUT_DIR", "/tmp/Evidence"))
+LOG_DIR      = Path(os.getenv("VAULT_LOG_DIR",    "/tmp/vault/Logs"))
 SCRIPTS_DIR  = VAULT_ROOT / "scripts"
 HISTORY_DIR  = VAULT_ROOT / "history"
 
@@ -80,28 +82,24 @@ app.add_middleware(
 @app.on_event("startup")
 def _startup_init() -> None:
     """
-    Best-effort directory and seed-file creation at server start.
+    Guarantee writable directories and seed log files on every cold start.
 
-    HuggingFace Spaces: /app is read-only, /tmp is writable.
+    HuggingFace Spaces: /app is read-only — all writes go to /tmp.
+      LOG_DIR      = /tmp/vault/Logs   (VAULT_LOG_DIR env var)
+      EVIDENCE_DIR = /tmp/Evidence     (EVIDENCE_OUT_DIR env var)
+
     All OSError exceptions are silently swallowed so the server always starts.
     """
-    # Evidence dir — env-overridable, defaults to /tmp/evidence (writable on HF)
-    try:
-        EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        pass
-
-    # Vault layout — succeeds locally; silently skipped on HF's read-only /app
-    for _sub in ("Logs", "Queue"):
+    # Create writable directories
+    for _d in (LOG_DIR, LOG_DIR.parent / "Queue", EVIDENCE_DIR):
         try:
-            (VAULT_DIR / _sub).mkdir(parents=True, exist_ok=True)
+            _d.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
 
-    # Seed empty log files so log endpoints never 404 on a fresh instance
-    _log_dir = VAULT_DIR / "Logs"
+    # Seed empty log files (JSONL — empty file = zero entries)
     for _fname in ("execution_log.json", "prompt_chain.json", "health_log.json"):
-        _fpath = _log_dir / _fname
+        _fpath = LOG_DIR / _fname
         try:
             if not _fpath.exists():
                 _fpath.write_text("", encoding="utf-8")
@@ -210,13 +208,9 @@ def status():
         VAULT_DIR / "Updates" / "cloud_updates.md", 20
     )
 
-    last_execution = _tail_jsonl(
-        VAULT_DIR / "Logs" / "execution_log.json", 5
-    )
+    last_execution = _tail_jsonl(LOG_DIR / "execution_log.json", 5)
 
-    last_health = _tail_jsonl(
-        VAULT_DIR / "Logs" / "health_log.json", 1
-    )
+    last_health = _tail_jsonl(LOG_DIR / "health_log.json", 1)
 
     return {
         "vault_root":      str(VAULT_ROOT),
@@ -277,22 +271,22 @@ def get_task(queue: str, filename: str):
 
 @app.get("/logs/execution", tags=["Logs"])
 def logs_execution(tail: int = Query(default=50, ge=1, le=500)):
-    """Tail the execution log (vault/Logs/execution_log.json)."""
-    entries = _tail_jsonl(VAULT_DIR / "Logs" / "execution_log.json", tail)
+    """Tail the execution log (LOG_DIR/execution_log.json)."""
+    entries = _tail_jsonl(LOG_DIR / "execution_log.json", tail)
     return {"count": len(entries), "entries": entries}
 
 
 @app.get("/logs/health", tags=["Logs"])
 def logs_health(tail: int = Query(default=50, ge=1, le=500)):
-    """Tail the health log (vault/Logs/health_log.json)."""
-    entries = _tail_jsonl(VAULT_DIR / "Logs" / "health_log.json", tail)
+    """Tail the health log (LOG_DIR/health_log.json)."""
+    entries = _tail_jsonl(LOG_DIR / "health_log.json", tail)
     return {"count": len(entries), "entries": entries}
 
 
 @app.get("/logs/prompt", tags=["Logs"])
 def logs_prompt(tail: int = Query(default=20, ge=1, le=200)):
-    """Tail the SHA-256-chained prompt log (history/prompt_log.json)."""
-    entries = _tail_jsonl(HISTORY_DIR / "prompt_log.json", tail)
+    """Tail the SHA-256-chained prompt log (LOG_DIR/prompt_chain.json)."""
+    entries = _tail_jsonl(LOG_DIR / "prompt_chain.json", tail)
     return {"count": len(entries), "entries": entries}
 
 
@@ -415,8 +409,8 @@ def reject_task(filename: str):
 
 
 def _append_approval_log(filename: str, action: str) -> None:
-    """Append an approval/rejection event to vault/Logs/execution_log.json."""
-    log_path = VAULT_DIR / "Logs" / "execution_log.json"
+    """Append an approval/rejection event to LOG_DIR/execution_log.json."""
+    log_path = LOG_DIR / "execution_log.json"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     record = json.dumps({
         "id":        filename,
