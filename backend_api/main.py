@@ -12,13 +12,21 @@ Environment variables:
 """
 
 import json
+import logging
 import os
 import subprocess
 import sys
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -155,6 +163,22 @@ def _startup_init() -> None:
         except OSError:
             pass
 
+    # ── Start cloud agent background thread ───────────────────────────────────
+    try:
+        from agent.cloud_agent import run_cloud_agent_loop
+        _t = threading.Thread(
+            target=run_cloud_agent_loop,
+            kwargs={"interval": 5.0},
+            daemon=True,
+            name="cloud_agent",
+        )
+        _t.start()
+        logging.getLogger(__name__).info("[startup] Cloud agent thread started.")
+    except Exception as _exc:
+        logging.getLogger(__name__).warning(
+            "[startup] Could not start cloud agent: %s", _exc
+        )
+
 
 # ── Root ──────────────────────────────────────────────────────────────────────
 
@@ -218,6 +242,29 @@ def _parse_task(path: Path) -> dict[str, Any]:
         return {"_parse_error": str(exc), "filename": path.name}
 
 
+def _read_heartbeat(path: Path) -> dict:
+    """
+    Read agent_heartbeat.json and return agent_status + last_heartbeat.
+
+    Returns agent_status = "online"  if heartbeat is < 30 s old.
+            agent_status = "offline" otherwise (file missing / stale / corrupt).
+    """
+    if not path.exists():
+        return {"agent_status": "offline", "last_heartbeat": None}
+    try:
+        data    = json.loads(path.read_text(encoding="utf-8"))
+        ts_str  = data.get("timestamp")
+        if ts_str:
+            ts  = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - ts).total_seconds()
+            status = "online" if age < 30 else "offline"
+        else:
+            status = "offline"
+        return {"agent_status": status, "last_heartbeat": ts_str}
+    except Exception:
+        return {"agent_status": "offline", "last_heartbeat": None}
+
+
 def _queue_path(name: str) -> Path:
     """Resolve a queue name to its directory path."""
     if name not in QUEUE_DIRS:
@@ -249,8 +296,9 @@ def status():
     """
     Summarise the current vault state:
     - Task counts for all known queues
-    - Last 5 lines of cloud_updates.md (Cloud Agent heartbeat)
+    - Cloud agent online/offline status (based on heartbeat freshness)
     - Last 5 execution log entries
+    - Last health record
     """
     counts: dict[str, int] = {}
     for key, path in QUEUE_DIRS.items():
@@ -261,8 +309,8 @@ def status():
     )
 
     last_execution = _tail_jsonl(LOG_DIR / "execution_log.json", 5)
-
-    last_health = _tail_jsonl(LOG_DIR / "health_log.json", 1)
+    last_health    = _tail_jsonl(LOG_DIR / "health_log.json", 1)
+    hb             = _read_heartbeat(LOG_DIR / "agent_heartbeat.json")
 
     return {
         "vault_root":      str(VAULT_ROOT),
@@ -271,6 +319,8 @@ def status():
         "cloud_updates":   cloud_updates[-5:] if cloud_updates else [],
         "last_executions": last_execution,
         "last_health":     last_health[0] if last_health else None,
+        "agent_status":    hb["agent_status"],
+        "last_heartbeat":  hb["last_heartbeat"],
         "time":            datetime.now(timezone.utc).isoformat(),
     }
 
