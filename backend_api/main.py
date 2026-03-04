@@ -31,7 +31,7 @@ VERSION = "1.0.0"
 _HERE       = Path(__file__).resolve().parent
 VAULT_ROOT  = Path(os.getenv("VAULT_ROOT", str(_HERE.parent)))
 VAULT_DIR   = VAULT_ROOT / "vault"
-EVIDENCE_DIR = VAULT_ROOT / "Evidence"
+EVIDENCE_DIR = Path(os.getenv("EVIDENCE_OUT_DIR", "/tmp/evidence"))
 SCRIPTS_DIR  = VAULT_ROOT / "scripts"
 HISTORY_DIR  = VAULT_ROOT / "history"
 

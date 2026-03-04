@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import sys as _sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,7 +45,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # ---------------------------------------------------------------------------
 
 for _d in [
-    "Evidence",
     "vault/Pending_Approval",
     "vault/Done",
     "vault/Logs",
@@ -52,7 +52,10 @@ for _d in [
     "logging",
     "scripts",
 ]:
-    (_PROJECT_ROOT / _d).mkdir(parents=True, exist_ok=True)
+    try:
+        (_PROJECT_ROOT / _d).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass  # read-only filesystem on HF Spaces — vault dirs are optional
 
 # ---------------------------------------------------------------------------
 # Bootstrap prompt_logger (avoid stdlib logging/ name collision).
@@ -78,7 +81,8 @@ _PENDING_DIR    = _PROJECT_ROOT / "vault" / "Pending_Approval"
 _DONE_DIR       = _PROJECT_ROOT / "vault" / "Done"
 _EXEC_LOG       = _PROJECT_ROOT / "vault" / "Logs" / "execution_log.json"
 _PROMPT_LOG     = _PROJECT_ROOT / "history" / "prompt_log.json"
-_EVIDENCE_DIR   = _PROJECT_ROOT / "Evidence"
+_EVIDENCE_DIR   = Path(os.environ.get("EVIDENCE_OUT_DIR", "/tmp/evidence"))
+os.makedirs(_EVIDENCE_DIR, exist_ok=True)
 _OUTPUT_FILE    = _EVIDENCE_DIR / "JUDGE_PROOF.md"
 
 
