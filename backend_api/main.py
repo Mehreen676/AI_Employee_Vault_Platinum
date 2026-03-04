@@ -75,6 +75,13 @@ app.add_middleware(
 )
 
 
+# ── Root ──────────────────────────────────────────────────────────────────────
+
+@app.get("/")
+def root():
+    return {"ok": True, "service": "ai-employee-vault-backend"}
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _safe_filename(filename: str) -> str:
