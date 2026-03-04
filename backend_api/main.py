@@ -30,11 +30,11 @@ VERSION = "1.0.0"
 # Resolve repo root: backend_api/ lives one level inside the repo
 _HERE       = Path(__file__).resolve().parent
 VAULT_ROOT  = Path(os.getenv("VAULT_ROOT", str(_HERE.parent)))
-VAULT_DIR   = VAULT_ROOT / "vault"
-# On HuggingFace Spaces /app is read-only; writable paths live under /tmp
-EVIDENCE_DIR = Path(os.getenv("EVIDENCE_OUT_DIR", "/tmp/Evidence"))
+# On HuggingFace Spaces /app is read-only; all state lives under /tmp
+VAULT_DIR   = Path(os.getenv("VAULT_DIR",        "/tmp/vault"))
+EVIDENCE_DIR = Path(os.getenv("EVIDENCE_OUT_DIR", "/tmp/evidence"))
 LOG_DIR      = Path(os.getenv("VAULT_LOG_DIR",    "/tmp/vault/Logs"))
-SCRIPTS_DIR  = VAULT_ROOT / "scripts"
+SCRIPTS_DIR  = VAULT_ROOT / "scripts"   # read-only /app/scripts is fine
 HISTORY_DIR  = VAULT_ROOT / "history"
 
 _origins_env = os.getenv("ALLOWED_ORIGINS", "*")
@@ -77,6 +77,33 @@ app.add_middleware(
 )
 
 
+# ── No-cache middleware (prevents stale UI reads) ─────────────────────────────
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: StarletteRequest, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        return response
+
+app.add_middleware(NoCacheMiddleware)
+
+
+# ── Logging helper ────────────────────────────────────────────────────────────
+
+def _append_log(path: Path, record: dict) -> None:
+    """Append one JSONL record to a log file; creates the file if needed."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
 # ── Startup initialisation ────────────────────────────────────────────────────
 
 @app.on_event("startup")
@@ -84,20 +111,31 @@ def _startup_init() -> None:
     """
     Guarantee writable directories and seed log files on every cold start.
 
-    HuggingFace Spaces: /app is read-only — all writes go to /tmp.
-      LOG_DIR      = /tmp/vault/Logs   (VAULT_LOG_DIR env var)
-      EVIDENCE_DIR = /tmp/Evidence     (EVIDENCE_OUT_DIR env var)
-
-    All OSError exceptions are silently swallowed so the server always starts.
+    HuggingFace Spaces: /app is read-only — all state goes to /tmp.
+      VAULT_DIR    = /tmp/vault          (VAULT_DIR env var)
+      LOG_DIR      = /tmp/vault/Logs     (VAULT_LOG_DIR env var)
+      EVIDENCE_DIR = /tmp/evidence       (EVIDENCE_OUT_DIR env var)
     """
-    # Create writable directories
-    for _d in (LOG_DIR, LOG_DIR.parent / "Queue", EVIDENCE_DIR):
+    # All directories to guarantee exist at boot
+    _boot_dirs = [
+        LOG_DIR,
+        EVIDENCE_DIR,
+        VAULT_DIR / "Needs_Action",
+        VAULT_DIR / "Waiting_Approval",
+        VAULT_DIR / "Pending_Approval",
+        VAULT_DIR / "Approved",
+        VAULT_DIR / "Done",
+        VAULT_DIR / "Retry",
+        VAULT_DIR / "Rejected",
+        VAULT_DIR / "Queue",
+    ]
+    for _d in _boot_dirs:
         try:
             _d.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
 
-    # Seed empty log files (JSONL — empty file = zero entries)
+    # Seed empty JSONL log files so endpoints return [] instead of 404
     for _fname in ("execution_log.json", "prompt_chain.json", "health_log.json"):
         _fpath = LOG_DIR / _fname
         try:
@@ -184,12 +222,15 @@ def _queue_path(name: str) -> Path:
 
 @app.get("/health", tags=["System"])
 def health():
-    """Basic liveness probe — returns 200 immediately."""
-    return {
-        "status": "ok",
-        "time":    datetime.now(timezone.utc).isoformat(),
-        "version": VERSION,
-    }
+    """Basic liveness probe — returns 200 and appends a health_log entry."""
+    now = datetime.now(timezone.utc).isoformat()
+    _append_log(LOG_DIR / "health_log.json", {
+        "timestamp": now,
+        "status":    "ok",
+        "version":   VERSION,
+        "source":    "health_check",
+    })
+    return {"status": "ok", "time": now, "version": VERSION}
 
 
 @app.get("/status", tags=["System"])
@@ -464,6 +505,29 @@ def generate_evidence(n: int = Query(default=20, ge=1, le=200)):
     if out_path.exists():
         lines   = out_path.read_text(encoding="utf-8").splitlines()
         snippet = "\n".join(lines[:15])
+
+    now = datetime.now(timezone.utc).isoformat()
+    # Append execution record so "Last Executions" shows this event
+    _append_log(LOG_DIR / "execution_log.json", {
+        "id":        "evidence_pack",
+        "task_type": "evidence_generation",
+        "action":    "generate_evidence_pack",
+        "result":    "success",
+        "timestamp": now,
+        "source":    "backend_api",
+        "n":         n,
+    })
+    # Append prompt-chain record so Logs → Prompt is never empty
+    _append_log(LOG_DIR / "prompt_chain.json", {
+        "timestamp":  now,
+        "component":  "system",
+        "event_type": "result_processed",
+        "content":    {
+            "summary": f"Evidence pack generated (n={n})",
+            "detail":  str(out_path),
+        },
+        "source": "backend_api",
+    })
 
     return {
         "status":   "ok",
