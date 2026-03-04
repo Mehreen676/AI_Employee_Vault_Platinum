@@ -181,7 +181,7 @@ def _startup_init() -> None:
             pass
 
     # ── Seed empty JSONL log files ─────────────────────────────────────────────
-    for _fname in ("execution_log.json", "prompt_chain.json", "health_log.json"):
+    for _fname in ("execution_log.json", "prompt_chain.json", "health_log.json", "heartbeat_log.json"):
         _fpath = LOG_DIR / _fname
         try:
             if not _fpath.exists():
@@ -306,13 +306,20 @@ def _queue_path(name: str) -> Path:
 
 @app.get("/health", tags=["System"])
 def health():
-    """Basic liveness probe — returns 200 and appends a health_log entry."""
+    """Basic liveness probe — returns 200 and appends health + heartbeat log entries."""
     now = datetime.now(timezone.utc).isoformat()
     _append_log(LOG_DIR / "health_log.json", {
         "timestamp": now,
         "status":    "ok",
         "version":   VERSION,
         "source":    "health_check",
+    })
+    # Seed heartbeat_log so the panel shows data even before the agent loop fires
+    _append_log(LOG_DIR / "heartbeat_log.json", {
+        "timestamp": now,
+        "status":    "online",
+        "source":    "health_check",
+        "message":   "heartbeat",
     })
     return {"status": "ok", "time": now, "version": VERSION}
 
@@ -330,9 +337,12 @@ def status():
     for key, path in QUEUE_DIRS.items():
         counts[key] = _count_dir(path)
 
-    cloud_updates = _tail_text(
-        VAULT_DIR / "Updates" / "cloud_updates.md", 20
-    )
+    # Populate cloud_updates from heartbeat_log (displayed in the UI panel)
+    _hb_entries    = _tail_jsonl(LOG_DIR / "heartbeat_log.json", 6)
+    cloud_updates  = [
+        f"{e.get('timestamp', '?')}  [{e.get('source', '?')}]  {e.get('message', '?')}  status={e.get('status', '?')}"
+        for e in _hb_entries
+    ]
 
     last_execution = _tail_jsonl(LOG_DIR / "execution_log.json", 5)
     last_health    = _tail_jsonl(LOG_DIR / "health_log.json", 1)
@@ -342,7 +352,7 @@ def status():
         "vault_root":      str(VAULT_ROOT),
         "vault_dir":       str(VAULT_DIR),
         "queues":          counts,
-        "cloud_updates":   cloud_updates[-5:] if cloud_updates else [],
+        "cloud_updates":   cloud_updates,
         "last_executions": last_execution,
         "last_health":     last_health[0] if last_health else None,
         "agent_status":    hb["agent_status"],
@@ -471,6 +481,18 @@ def logs_prompt(tail: int = Query(default=20, ge=1, le=200)):
     """Tail the SHA-256-chained prompt log (LOG_DIR/prompt_chain.json)."""
     entries = _tail_jsonl(LOG_DIR / "prompt_chain.json", tail)
     return {"count": len(entries), "entries": entries}
+
+
+@app.get("/logs/heartbeat", tags=["Logs"])
+def logs_heartbeat(tail: int = Query(default=50, ge=1, le=500)):
+    """
+    Return the most recent heartbeat log entries (LOG_DIR/heartbeat_log.json),
+    most recent first.
+
+    Each entry: { timestamp, status, source, message }
+    """
+    entries = _tail_jsonl(LOG_DIR / "heartbeat_log.json", tail)
+    return {"count": len(entries), "entries": list(reversed(entries))}
 
 
 @app.get("/evidence/judge-proof", tags=["Evidence"])

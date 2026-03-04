@@ -16,6 +16,7 @@ Loop behaviour (default interval = 5 s):
     Phase 1: Promote every file in Waiting_Approval  → Done
     Phase 2: Promote every file in Needs_Action      → Waiting_Approval
     Phase 3: Write heartbeat to Logs/agent_heartbeat.json
+             Append entry to  Logs/heartbeat_log.json
 
 Files moved to Waiting_Approval in Phase 2 are NOT immediately promoted
 to Done in the same tick — they wait at least one full interval first.
@@ -48,6 +49,7 @@ def _dirs() -> dict[str, Path]:
         "execution_log":    log_dir   / "execution_log.json",
         "prompt_chain":     log_dir   / "prompt_chain.json",
         "heartbeat":        log_dir   / "agent_heartbeat.json",
+        "heartbeat_log":    log_dir   / "heartbeat_log.json",
     }
 
 
@@ -80,6 +82,16 @@ def _write_heartbeat(path: Path) -> None:
         )
     except OSError as exc:
         log.warning("[cloud_agent] Heartbeat write failed: %s", exc)
+
+
+def _append_heartbeat_log(path: Path) -> None:
+    """Append a heartbeat entry to the JSONL heartbeat log."""
+    _append_jsonl(path, {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "status":    "online",
+        "source":    "cloud_agent",
+        "message":   "heartbeat",
+    })
 
 
 def _safe_dest(dest_dir: Path, filename: str) -> Path:
@@ -195,6 +207,7 @@ def run_cloud_agent_loop(interval: float = 5.0) -> None:
 
             # ── Heartbeat ─────────────────────────────────────────────────────
             _write_heartbeat(d["heartbeat"])
+            _append_heartbeat_log(d["heartbeat_log"])
 
         except Exception as exc:
             log.exception("[cloud_agent] Unhandled loop error: %s", exc)
