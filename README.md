@@ -6,11 +6,38 @@
 ![AI](https://img.shields.io/badge/AI-Claude%204.6-purple)
 ![Odoo](https://img.shields.io/badge/ERP-Odoo%2016%2F17-blueviolet)
 ![License](https://img.shields.io/badge/license-Enterprise-red)
+![Architecture](https://img.shields.io/badge/architecture-Distributed%20AI-orange)
+![Cloud](https://img.shields.io/badge/cloud-Oracle%20OCI%20%2B%20HuggingFace-lightblue)
+![HITL](https://img.shields.io/badge/HITL-Human--in--the--Loop-critical)
 
-**Version:** 1.4.0
-**Tier:** Platinum (Enterprise Distributed)
-**Status:** Active Development — Foundation Phase Complete
-**Classification:** Enterprise Internal
+**Version:** 1.4.0 | **Tier:** Platinum (Enterprise Distributed) | **Cloud:** Oracle OCI (me-dubai-1) + HuggingFace Spaces
+
+---
+
+## ⚡ Quick Judge Run (3 Commands)
+
+For fast evaluation, judges can verify the **full distributed AI pipeline** in under a minute:
+
+```bash
+# 1. Start all system processes with health monitoring
+python watchdog.py --start-all --interval 10
+
+# 2. Generate cryptographic evidence pack from live vault state
+python scripts/generate_evidence_pack.py --n 20
+
+# 3. Read the judge-ready audit report
+cat Evidence/JUDGE_PROOF.md
+```
+
+These three commands demonstrate:
+
+| Command | What It Proves |
+|---|---|
+| `watchdog.py --start-all` | Distributed AI pipeline — Cloud Agent + Gmail Watcher + Local Executor coordinated by Watchdog |
+| `generate_evidence_pack.py` | Vault state machine workflow — tasks moving through Needs_Action → Pending_Approval → Done |
+| `cat JUDGE_PROOF.md` | Prompt history logging with SHA-256 hash chain + evidence generation system |
+
+> Full 9-step demo: see [Platinum Demo Flow](#-platinum-demo-flow) below.
 
 ---
 
@@ -24,6 +51,144 @@ This is not a demo. This is a production-class distributed system designed for o
 - Strict separation between AI reasoning (cloud) and task execution (local)
 - Cryptographically verifiable prompt and action history
 - Structured, spec-driven development practices
+
+---
+
+## System Architecture
+
+The Platinum Tier is a **fully distributed, multi-layer AI pipeline** with strict separation of concerns between cloud intelligence, human approval, and local execution.
+
+```mermaid
+flowchart TB
+    classDef inputStyle  fill:#1a3a5c,stroke:#4fc3f7,color:#e3f2fd,stroke-width:2px
+    classDef cloudStyle  fill:#1b3a2d,stroke:#66bb6a,color:#e8f5e9,stroke-width:2px
+    classDef vaultStyle  fill:#3e2723,stroke:#ff8a65,color:#fbe9e7,stroke-width:2px
+    classDef hitlStyle   fill:#311b92,stroke:#ce93d8,color:#f3e5f5,stroke-width:2px
+    classDef localStyle  fill:#0d2137,stroke:#42a5f5,color:#e3f2fd,stroke-width:2px
+    classDef toolsStyle  fill:#1a237e,stroke:#7986cb,color:#e8eaf6,stroke-width:2px
+    classDef svcStyle    fill:#1b2a1b,stroke:#a5d6a7,color:#f1f8e9,stroke-width:2px
+    classDef outputStyle fill:#4a148c,stroke:#f48fb1,color:#fce4ec,stroke-width:2px
+
+    subgraph INPUT["📥 INPUT LAYER"]
+        GW["📧 Gmail Watcher\ngmail_watcher.py"]
+        MD["📂 Manual Drop\nNeeds_Action/"]
+    end
+
+    subgraph CLOUD["☁️ CLOUD LAYER  (HuggingFace Spaces — Always-On 24/7)"]
+        CA["🤖 Cloud Agent v1.4.0\nClaim-by-move · Daemon mode"]
+        TP["🧠 Task Planning\ntask_generator.py"]
+        PG["✍️ Prompt Generation\nSHA-256 hash chain"]
+        CA --> TP --> PG
+    end
+
+    subgraph VAULT["🗄️ VAULT STATE MACHINE  (File-System Communication Bus)"]
+        direction LR
+        NA["📋 Needs_Action/"] --> PA["📬 Pending_Approval/"] --> AP["✅ Approved/"] --> DN["✔️ Done/"]
+        AP --> RQ["🔄 Retry_Queue/"]
+        PA --> LG["📊 Logs/"]
+    end
+
+    subgraph HITL["👤 HITL LAYER  (Human-In-The-Loop Gate)"]
+        HG["🚧 HITL Gate\nhitl.py"]
+        HA["✅ Human Approval\napprove.py"]
+        HG --> HA
+    end
+
+    subgraph LOCAL["💻 LOCAL EXECUTION  (On-Premise)"]
+        LE["⚙️ Local Executor v1.3.0\nSingle-writer for Dashboard.md"]
+        MT["🔧 MCP Tool Layer\nrouter.py · registry.py"]
+        LE --> MT
+    end
+
+    subgraph TOOLS["🛠️ MCP TOOLS"]
+        EM["📧 Email MCP"] & CM["📅 Calendar MCP"] & FM["📁 File MCP"] & SM["📱 Social MCP"] & OD["🏢 Odoo\nXML-RPC draft-only"]
+    end
+
+    subgraph SERVICES["⚙️ SYSTEM SERVICES"]
+        WD["🐕 Watchdog\nAuto-restart"] & RL["⏱️ Rate Limiter\nemail≤10/hr · pay≤3/day"] & RT["🔁 Retry Logic\nExponential backoff"] & PL["📝 Prompt Logger\nSHA-256 · Append-only"]
+    end
+
+    subgraph OUTPUT["📤 OUTPUT LAYER"]
+        EL["📋 Execution Logs"] & EP["🔍 Evidence Pack\nJUDGE_PROOF.md"] & CB["📊 CEO Briefing"] & HL["💚 Health Logs"]
+    end
+
+    GW -->|"atomic rename"| NA
+    MD --> NA
+    NA -->|"claim-by-move"| CA
+    CA -->|"task manifest"| PA
+    PA -->|"HITL check"| HG
+    HA -->|"moves to Approved/"| AP
+    PA -->|"low-risk auto"| AP
+    AP -->|"claim-by-move"| LE
+    MT --> EM & CM & FM & SM & OD
+    LE -->|"success"| DN
+    LE -->|"failure"| RQ
+    LE --> EL
+    WD -.->|"supervises"| CA & GW & LE
+    WD --> HL
+    RL -.->|"gates"| GW & LE
+    EL & HL & PL -->|"read by"| EP
+    EL --> CB
+
+    class GW,MD inputStyle
+    class CA,TP,PG cloudStyle
+    class NA,PA,AP,DN,RQ,LG vaultStyle
+    class HG,HA hitlStyle
+    class LE,MT localStyle
+    class EM,CM,FM,SM,OD toolsStyle
+    class WD,RL,RT,PL svcStyle
+    class EL,EP,CB,HL outputStyle
+```
+
+> Full architecture details with data-flow diagrams, claim-by-move protocol, and permission boundary matrix:
+> [Evidence/PLATINUM_ARCHITECTURE.md](Evidence/PLATINUM_ARCHITECTURE.md)
+
+---
+
+## Live System Flow Demo
+
+The complete system pipeline — from email receipt to evidence generation:
+
+```
+Step 1  📧  Gmail Watcher receives an email
+            gmail_watcher.py polls Gmail API (or stub fallback)
+            Writes  vault/Needs_Action/email/email_001.md  (atomic rename)
+                │
+Step 2  📋  File enters vault/Needs_Action
+            Cloud Agent detects the new file via directory scan
+            Claims it with  Path.rename()  → vault/In_Progress/cloud/
+                │
+Step 3  🤖  Cloud Agent processes the task
+            Decomposes email intent, selects MCP tools, generates prompt
+            Writes structured task manifest to vault/Pending_Approval/
+            Logs prompt with SHA-256 hash to history/prompt_log.json
+                │
+Step 4  🚧  HITL gate triggers for high-risk tasks
+            hitl.py intercepts the manifest if risk threshold exceeded
+            Pipeline pauses — awaits human decision
+                │
+Step 5  ✅  Human approves the task
+            approve.py moves manifest: Pending_Approval/ → Approved/
+            No software component can perform this step
+                │
+Step 6  ⚙️  Local Executor executes the task
+            Claims file: Approved/ → In_Progress/local/ (atomic rename)
+            Routes to correct MCP tool (Email / Calendar / Odoo / Social)
+            Writes result back into task manifest
+                │
+Step 7  ✔️  Task moves to vault/Done/
+            Execution record appended to vault/Logs/execution_log.json
+            Dashboard.md updated (Local Executor is sole writer)
+                │
+Step 8  🔍  Evidence pack is generated
+            python scripts/generate_evidence_pack.py --n 20
+            Reads live vault state + last N prompt log entries
+            Writes Evidence/JUDGE_PROOF.md — single auditable document
+```
+
+![System Demo Pipeline](Evidence/demo_pipeline.gif)
+
+> **Note:** Replace `Evidence/demo_pipeline.gif` with a recorded screen capture of the live pipeline. A 30–60 second recording of `watchdog.py --start-all` followed by vault directory listings is sufficient to demonstrate the full flow.
 
 ---
 
@@ -85,9 +250,14 @@ AI_Employee_Vault_Platinum/
 │   ├── prompt_log.json       # Append-only JSONL prompt + event log
 │   └── session_notes.md      # Human-readable session records
 │
-├── Evidence/                 # Judge-facing output
-│   ├── JUDGE_PROOF.md        # Generated evidence pack (gitignored at runtime)
-│   └── RUN_CHECKLIST.md      # Quick-start command reference
+├── Evidence/                 # Judge-facing output artifacts
+│   ├── JUDGE_PROOF.md              # Generated evidence pack (gitignored at runtime)
+│   ├── PLATINUM_ARCHITECTURE.md    # Full Mermaid architecture diagram + data-flow
+│   ├── PLATINUM_ARCHITECTURE.png   # Rendered architecture diagram (generate from .md)
+│   ├── demo_pipeline.gif           # Screen-captured live pipeline demo (placeholder)
+│   ├── MCP_PROOF.md                # MCP tool execution proof
+│   ├── HISTORY_PROOF.md            # Prompt history integrity proof
+│   └── RUN_CHECKLIST.md            # Quick-start command reference
 │
 ├── vault/                    # Shared file-system state machine (inter-component bus)
 │   ├── Needs_Action/         # Input queue — Gmail watcher deposits .md files here
@@ -219,6 +389,23 @@ head -1 history/prompt_log.json | python -m json.tool
 
 ---
 
+## Evidence Artifacts
+
+The `Evidence/` directory contains judge-ready verification artifacts. These files help judges quickly verify the system without running the full pipeline locally:
+
+| File | Contents | How to Generate |
+|---|---|---|
+| [Evidence/PLATINUM_ARCHITECTURE.md](Evidence/PLATINUM_ARCHITECTURE.md) | Full Mermaid architecture diagram, claim-by-move protocol, permission matrix | Already committed — open in any Markdown renderer |
+| [Evidence/JUDGE_PROOF.md](Evidence/JUDGE_PROOF.md) | Live vault state, last N prompt log entries, SHA-256 chain integrity statement | `python scripts/generate_evidence_pack.py --n 20` |
+| [Evidence/MCP_PROOF.md](Evidence/MCP_PROOF.md) | MCP tool execution trace with timestamps | `python tools/mcp_health_report.py` |
+| [Evidence/HISTORY_PROOF.md](Evidence/HISTORY_PROOF.md) | Prompt history chain proof with hash verification | Generated by evidence pack script |
+| [Evidence/RUN_CHECKLIST.md](Evidence/RUN_CHECKLIST.md) | Step-by-step run commands for judges | Open directly |
+| Evidence/demo_pipeline.gif | Recorded screen capture of live pipeline | Replace placeholder with Loom/screen recording |
+
+> All Evidence artifacts are human-readable. No special tooling required. The Mermaid diagram renders natively in GitHub, VS Code, and most Markdown viewers.
+
+---
+
 ## Development Phases
 
 | Phase | Scope | Status |
@@ -241,6 +428,75 @@ All contributions must follow the spec-driven development protocol:
 4. Reference the spec document and section in your commit message
 
 ---
+
+---
+
+## System Health & Metrics
+
+When the system is running, real-time health data is available from the Watchdog supervisor and the vault log files.
+
+**Live process status (Watchdog output):**
+
+```
+Cloud Agent   : Running  (PID 1234, restarts: 0)
+Gmail Watcher : Running  (PID 1235, restarts: 0)
+Local Executor: Running  (PID 1236, restarts: 0)
+Watchdog      : Active   (cycle 47, interval: 10s)
+Tasks Processed: 12
+Errors         : 0
+Last Run       : Auto-logged in vault/Logs/
+```
+
+**Health data is persisted to `vault/Logs/health_log.json`** — one JSONL record per Watchdog cycle:
+
+```json
+{
+  "timestamp": "2026-03-04T07:23:41.882Z",
+  "cycle": 47,
+  "cloud_agent":    {"alive": true, "pid": 1234, "restarts": 0},
+  "gmail_watcher":  {"alive": true, "pid": 1235, "restarts": 0},
+  "local_executor": {"alive": true, "pid": 1236, "restarts": 0}
+}
+```
+
+**View live health log:**
+
+```bash
+cat vault/Logs/health_log.json
+```
+
+**Rate limiter state** is stored at `vault/Logs/rate_limit_state.json` — persists across restarts so rate counters survive crashes without double-sending:
+
+```bash
+cat vault/Logs/rate_limit_state.json
+```
+
+| Metric | Limit | Storage |
+|---|---|---|
+| Email tasks | ≤ 10 / hour | vault/Logs/rate_limit_state.json |
+| Social posts | ≤ 20 / hour | vault/Logs/rate_limit_state.json |
+| Payment tasks | ≤ 3 / day | vault/Logs/rate_limit_state.json |
+| Execution records | Unlimited (JSONL) | vault/Logs/execution_log.json |
+| Health records | Unlimited (JSONL) | vault/Logs/health_log.json |
+| Prompt log entries | Unlimited (SHA-256 chain) | history/prompt_log.json |
+
+---
+
+## Demo Video
+
+A 1-minute walkthrough demonstrating the full Platinum Tier pipeline:
+
+**Demo Video:** https://your-demo-link
+
+The video covers:
+
+1. **Oracle VM deployment** — SSH into the live OCI VM (`me-dubai-1`, Ubuntu 20.04), verify `git rev-parse --short HEAD` matches this repository
+2. **Watchdog system startup** — `python watchdog.py --start-all --interval 10` launches all three processes with health monitoring
+3. **Task lifecycle through the vault** — watch files move atomically through `Needs_Action/ → In_Progress/cloud/ → Pending_Approval/ → Approved/ → In_Progress/local/ → Done/`
+4. **Evidence pack generation** — `python scripts/generate_evidence_pack.py --n 20` produces `Evidence/JUDGE_PROOF.md` with the full audit trail
+5. **systemd proof** — `systemctl status` output showing `Active: active (running)` as kernel-level process supervision
+
+> Replace the placeholder URL above with your recorded Loom / YouTube / Google Drive link before submission.
 
 ---
 
