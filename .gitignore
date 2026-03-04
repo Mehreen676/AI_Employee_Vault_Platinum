@@ -31,6 +31,18 @@ vault/Logs/rate_limit_state.json
 # Claude IDE settings
 .claude/
 
+# Node / Next.js build artifacts
+frontend_dashboard/.next/
+frontend_dashboard/node_modules/
+frontend_dashboard/package-lock.json
+frontend_dashboard/next-env.d.ts
+
+# Evidence runtime output
+Evidence/JUDGE_PROOF.md
+
 # OS
 .DS_Store
 Thumbs.db
+
+# HuggingFace Space backend (separate git repo — pushed independently)
+hf_space_backend/

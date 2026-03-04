@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, getBackendUrl } from '@/lib/api';
 import { QUEUE_META, type VaultStatus, type GenerateEvidenceResponse } from '@/lib/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -289,15 +289,25 @@ export default function OverviewPage() {
           <div className="vault-card p-5">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
               {(['cloud_agent', 'gmail_watcher', 'local_executor'] as const).map((key) => {
-                // Prefer watchdog object (new); fall back to last_health legacy shape
-                const wd    = status?.watchdog?.[key];
-                const proc  = status?.last_health?.[key as keyof typeof status.last_health] as
+                // 1st choice: status.watchdog[key] (backend-computed, 30 s window)
+                const wd   = status?.watchdog?.[key];
+                // 2nd choice (cloud_agent only): last_heartbeat freshness vs status.time
+                const heartbeatAlive =
+                  key === 'cloud_agent' &&
+                  !wd &&
+                  !!status?.last_heartbeat &&
+                  !!status?.time &&
+                  (new Date(status.time).getTime() - new Date(status.last_heartbeat).getTime()) < 15_000;
+                // 3rd choice: legacy last_health process entry
+                const proc = status?.last_health?.[key as keyof typeof status.last_health] as
                   | { alive?: boolean; pid?: number; restarts?: number }
                   | undefined;
-                const alive = wd ? wd.status === 'online' : proc?.alive;
-                const sub   = wd
+                const alive = wd ? wd.status === 'online' : (heartbeatAlive || !!proc?.alive);
+                const sub = wd
                   ? (alive ? ts(wd.last_seen ?? undefined) : 'offline')
-                  : (alive ? `PID ${proc?.pid ?? '?'}` : 'offline');
+                  : heartbeatAlive
+                    ? ts(status?.last_heartbeat ?? undefined)
+                    : (alive ? `PID ${proc?.pid ?? '?'}` : 'offline');
                 return (
                   <div key={key} className="flex items-center gap-2.5">
                     <span className={`w-2 h-2 rounded-full shrink-0 ${alive ? 'bg-vault-green' : 'bg-vault-red'}`} />
@@ -307,7 +317,7 @@ export default function OverviewPage() {
                       </p>
                       <p className="text-vault-dim font-mono">
                         {sub}
-                        {!wd && (proc?.restarts ?? 0) > 0 && ` · ${proc?.restarts}↺`}
+                        {!wd && !heartbeatAlive && (proc?.restarts ?? 0) > 0 && ` · ${proc?.restarts}↺`}
                       </p>
                     </div>
                   </div>
@@ -326,6 +336,15 @@ export default function OverviewPage() {
           </div>
         </section>
       )}
+
+      {/* Debug info bar — shows API base URL + key status fields for dev/judges */}
+      <div className="mt-6 p-3 rounded-lg bg-vault-bg border border-vault-border/30 font-mono text-xs text-vault-dim space-y-0.5">
+        <p><span className="text-vault-muted">api_base:</span> {getBackendUrl()}</p>
+        <p><span className="text-vault-muted">status_time:</span> {status?.time ?? '—'}</p>
+        <p><span className="text-vault-muted">agent_status:</span> {status?.agent_status ?? '—'}</p>
+        <p><span className="text-vault-muted">last_heartbeat:</span> {status?.last_heartbeat ?? '—'}</p>
+        <p><span className="text-vault-muted">watchdog.cloud_agent:</span> {status?.watchdog?.cloud_agent?.status ?? '—'}</p>
+      </div>
 
       {/* Judge Proof modal */}
       {proofOpen && (

@@ -104,7 +104,7 @@ export function Sidebar() {
           </div>
         </div>
         <p className="mt-2 text-[10px] text-vault-dim font-mono truncate">
-          {process.env.NEXT_PUBLIC_BACKEND_URL || 'localhost:7860'}
+          {process.env.NEXT_PUBLIC_BACKEND_URL || 'localhost:8000'}
         </p>
       </div>
     </aside>

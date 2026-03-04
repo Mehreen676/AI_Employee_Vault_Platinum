@@ -189,6 +189,21 @@ def _startup_init() -> None:
         except OSError:
             pass
 
+    # ── Write initial heartbeat so /status shows cloud_agent=online immediately ─
+    try:
+        import json as _json
+        _hb_path = LOG_DIR / "agent_heartbeat.json"
+        _hb_path.write_text(
+            _json.dumps({
+                "agent":     "cloud_agent",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status":    "running",
+            }),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
     # ── Start cloud agent background thread ───────────────────────────────────
     try:
         from agent.cloud_agent import run_cloud_agent_loop
@@ -293,7 +308,7 @@ def _compute_watchdog() -> dict:
             return {"status": "offline", "last_seen": None}
 
     return {
-        "cloud_agent":    _component(LOG_DIR / "agent_heartbeat.json", 15.0),
+        "cloud_agent":    _component(LOG_DIR / "agent_heartbeat.json", 30.0),
         "gmail_watcher":  {"status": "offline", "last_seen": None},
         "local_executor": {"status": "offline", "last_seen": None},
     }

@@ -123,7 +123,7 @@ HuggingFace Spaces builds the Docker image and exposes port 7860 automatically.
 ## Quick curl Test Suite
 
 ```bash
-BASE=http://localhost:7860
+BASE=http://localhost:8000
 
 # 1. Health check
 curl -s $BASE/health | python -m json.tool

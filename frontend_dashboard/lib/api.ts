@@ -12,7 +12,7 @@ import type {
 // ── Base fetch ────────────────────────────────────────────────────────────────
 
 const BASE_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/$/, '') || 'http://localhost:7860';
+  process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/$/, '') || 'http://localhost:8000';
 
 export function getBackendUrl() {
   return BASE_URL;
