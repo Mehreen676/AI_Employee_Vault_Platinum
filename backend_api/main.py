@@ -30,11 +30,12 @@ VERSION = "1.0.0"
 # Resolve repo root: backend_api/ lives one level inside the repo
 _HERE       = Path(__file__).resolve().parent
 VAULT_ROOT  = Path(os.getenv("VAULT_ROOT", str(_HERE.parent)))
-# On HuggingFace Spaces /app is read-only; all state lives under /tmp
-VAULT_DIR   = Path(os.getenv("VAULT_DIR",        "/tmp/vault"))
-EVIDENCE_DIR = Path(os.getenv("EVIDENCE_OUT_DIR", "/tmp/evidence"))
-LOG_DIR      = Path(os.getenv("VAULT_LOG_DIR",    "/tmp/vault/Logs"))
-SCRIPTS_DIR  = VAULT_ROOT / "scripts"   # read-only /app/scripts is fine
+# On HuggingFace Spaces /app is read-only; all mutable state lives under /tmp
+VAULT_DIR    = Path(os.getenv("VAULT_DIR",        "/tmp/vault"))
+QUEUE_DIR    = VAULT_DIR / "Queue"
+EVIDENCE_DIR = Path(os.getenv("EVIDENCE_OUT_DIR", str(VAULT_DIR / "Evidence")))
+LOG_DIR      = Path(os.getenv("VAULT_LOG_DIR",    str(VAULT_DIR / "Logs")))
+SCRIPTS_DIR  = VAULT_ROOT / "scripts"   # read-only /app/scripts on HF
 HISTORY_DIR  = VAULT_ROOT / "history"
 
 _origins_env = os.getenv("ALLOWED_ORIGINS", "*")
@@ -46,13 +47,13 @@ ALLOWED_ORIGINS = (
 # ── Queue directory map ────────────────────────────────────────────────────────
 
 QUEUE_DIRS: dict[str, Path] = {
-    "needs_action":     VAULT_DIR / "Needs_Action",
-    "waiting_approval": VAULT_DIR / "Waiting_Approval",   # optional
-    "pending_approval": VAULT_DIR / "Pending_Approval",
-    "approved":         VAULT_DIR / "Approved",
-    "done":             VAULT_DIR / "Done",
-    "retry_queue":      VAULT_DIR / "Retry_Queue",
-    "rejected":         VAULT_DIR / "Rejected",
+    "needs_action":     QUEUE_DIR / "Needs_Action",
+    "waiting_approval": QUEUE_DIR / "Waiting_Approval",
+    "pending_approval": QUEUE_DIR / "Pending_Approval",
+    "approved":         QUEUE_DIR / "Approved",
+    "done":             QUEUE_DIR / "Done",
+    "retry_queue":      QUEUE_DIR / "Retry",       # key unchanged — matches UI
+    "rejected":         QUEUE_DIR / "Rejected",
 }
 
 # ── App setup ─────────────────────────────────────────────────────────────────
@@ -109,33 +110,35 @@ def _append_log(path: Path, record: dict) -> None:
 @app.on_event("startup")
 def _startup_init() -> None:
     """
-    Guarantee writable directories and seed log files on every cold start.
+    Guarantee writable directories, seed log files, and optionally seed demo
+    tasks on every cold start.
 
-    HuggingFace Spaces: /app is read-only — all state goes to /tmp.
-      VAULT_DIR    = /tmp/vault          (VAULT_DIR env var)
-      LOG_DIR      = /tmp/vault/Logs     (VAULT_LOG_DIR env var)
-      EVIDENCE_DIR = /tmp/evidence       (EVIDENCE_OUT_DIR env var)
+    HuggingFace Spaces: /app is read-only — all mutable state under /tmp.
+      VAULT_DIR    = /tmp/vault              (VAULT_DIR env var)
+      QUEUE_DIR    = /tmp/vault/Queue        (derived)
+      LOG_DIR      = /tmp/vault/Logs         (VAULT_LOG_DIR env var)
+      EVIDENCE_DIR = /tmp/vault/Evidence     (EVIDENCE_OUT_DIR env var)
+
+    Set DEMO_SEED_TASKS=true to auto-populate queues with sample tasks.
     """
-    # All directories to guarantee exist at boot
-    _boot_dirs = [
+    # ── Create all required directories ───────────────────────────────────────
+    for _d in (
         LOG_DIR,
         EVIDENCE_DIR,
-        VAULT_DIR / "Needs_Action",
-        VAULT_DIR / "Waiting_Approval",
-        VAULT_DIR / "Pending_Approval",
-        VAULT_DIR / "Approved",
-        VAULT_DIR / "Done",
-        VAULT_DIR / "Retry",
-        VAULT_DIR / "Rejected",
-        VAULT_DIR / "Queue",
-    ]
-    for _d in _boot_dirs:
+        QUEUE_DIR / "Needs_Action",
+        QUEUE_DIR / "Waiting_Approval",
+        QUEUE_DIR / "Pending_Approval",
+        QUEUE_DIR / "Approved",
+        QUEUE_DIR / "Done",
+        QUEUE_DIR / "Retry",
+        QUEUE_DIR / "Rejected",
+    ):
         try:
             _d.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
 
-    # Seed empty JSONL log files so endpoints return [] instead of 404
+    # ── Seed empty JSONL log files ─────────────────────────────────────────────
     for _fname in ("execution_log.json", "prompt_chain.json", "health_log.json"):
         _fpath = LOG_DIR / _fname
         try:
@@ -143,6 +146,61 @@ def _startup_init() -> None:
                 _fpath.write_text("", encoding="utf-8")
         except OSError:
             pass
+
+    # ── Demo task seeding (DEMO_SEED_TASKS=true) ───────────────────────────────
+    if os.getenv("DEMO_SEED_TASKS", "false").lower() == "true":
+        _seed_dirs = [
+            QUEUE_DIRS["needs_action"],
+            QUEUE_DIRS["pending_approval"],
+            QUEUE_DIRS["done"],
+        ]
+        # Only seed when every target queue is empty (don't overwrite real tasks)
+        _all_empty = all(
+            not any(True for _ in _d.iterdir())
+            for _d in _seed_dirs
+            if _d.exists()
+        )
+        if _all_empty:
+            _ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            _seed_tasks = [
+                (QUEUE_DIRS["needs_action"], f"task_seed_na_{_ts}.json", {
+                    "id": f"seed-na-{_ts}",
+                    "task_type": "email_review",
+                    "action": "review_incoming_email",
+                    "status": "pending",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "from": "demo@company.com",
+                    "subject": "Q1 Budget Review Request",
+                    "source": "demo_seed",
+                }),
+                (QUEUE_DIRS["pending_approval"], f"task_seed_pa_{_ts}.json", {
+                    "id": f"seed-pa-{_ts}",
+                    "task_type": "schedule_meeting",
+                    "action": "schedule_q1_review",
+                    "status": "pending_approval",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "subject": "Q1 Executive Review – Awaiting Approval",
+                    "source": "demo_seed",
+                }),
+                (QUEUE_DIRS["done"], f"task_seed_done_{_ts}.json", {
+                    "id": f"seed-done-{_ts}",
+                    "task_type": "data_export",
+                    "action": "export_q4_report",
+                    "status": "completed",
+                    "result": "success",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "subject": "Q4 Annual Report Export",
+                    "source": "demo_seed",
+                }),
+            ]
+            for _dir, _fname, _data in _seed_tasks:
+                try:
+                    (_dir / _fname).write_text(
+                        json.dumps(_data, indent=2, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                except OSError:
+                    pass
 
 
 # ── Root ──────────────────────────────────────────────────────────────────────
@@ -255,6 +313,7 @@ def status():
 
     return {
         "vault_root":      str(VAULT_ROOT),
+        "vault_dir":       str(VAULT_DIR),
         "queues":          counts,
         "cloud_updates":   cloud_updates[-5:] if cloud_updates else [],
         "last_executions": last_execution,
@@ -429,7 +488,7 @@ def reject_task(filename: str):
     """
     filename = _safe_filename(filename)
     source   = _hitl_source_path(filename)
-    dest_dir = VAULT_DIR / "Rejected"
+    dest_dir = QUEUE_DIRS["rejected"]
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / filename
 
@@ -481,6 +540,14 @@ def generate_evidence(n: int = Query(default=20, ge=1, le=200)):
             detail=f"Evidence script not found at {script}",
         )
 
+    # Forward resolved paths to subprocess so script uses identical dirs
+    _subprocess_env = {
+        **os.environ,
+        "EVIDENCE_OUT_DIR": str(EVIDENCE_DIR),
+        "VAULT_LOG_DIR":    str(LOG_DIR),
+        "PROMPT_LOG_PATH":  str(LOG_DIR / "prompt_chain.json"),
+    }
+
     try:
         result = subprocess.run(
             [sys.executable, str(script), "--n", str(n)],
@@ -488,6 +555,7 @@ def generate_evidence(n: int = Query(default=20, ge=1, le=200)):
             text=True,
             timeout=60,
             cwd=str(VAULT_ROOT),
+            env=_subprocess_env,
         )
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Evidence generation timed out.")

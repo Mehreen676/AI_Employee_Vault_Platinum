@@ -83,7 +83,7 @@ _DONE_DIR       = _PROJECT_ROOT / "vault" / "Done"
 _LOG_DIR        = Path(os.environ.get("VAULT_LOG_DIR",  "/tmp/vault/Logs"))
 _EXEC_LOG       = _LOG_DIR / "execution_log.json"
 _PROMPT_LOG     = Path(os.environ.get("PROMPT_LOG_PATH", str(_LOG_DIR / "prompt_chain.json")))
-_EVIDENCE_DIR   = Path(os.environ.get("EVIDENCE_OUT_DIR", "/tmp/evidence"))
+_EVIDENCE_DIR   = Path(os.environ.get("EVIDENCE_OUT_DIR", "/tmp/vault/Evidence"))
 os.makedirs(_EVIDENCE_DIR, exist_ok=True)
 _OUTPUT_FILE    = _EVIDENCE_DIR / "JUDGE_PROOF.md"
 
