@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
+from pydantic import BaseModel
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -54,6 +56,15 @@ QUEUE_DIRS: dict[str, Path] = {
     "done":             QUEUE_DIR / "Done",
     "retry_queue":      QUEUE_DIR / "Retry",       # key unchanged — matches UI
     "rejected":         QUEUE_DIR / "Rejected",
+}
+
+# Human-readable directory names accepted by POST /queue/enqueue
+_ENQUEUE_QUEUE_MAP: dict[str, Path] = {
+    "Needs_Action":     QUEUE_DIR / "Needs_Action",
+    "Waiting_Approval": QUEUE_DIR / "Waiting_Approval",
+    "Pending_Approval": QUEUE_DIR / "Pending_Approval",
+    "Done":             QUEUE_DIR / "Done",
+    "Retry":            QUEUE_DIR / "Retry",
 }
 
 # ── App setup ─────────────────────────────────────────────────────────────────
@@ -292,6 +303,65 @@ def list_queue(name: str, limit: int = Query(default=50, ge=1, le=500)):
         tasks.append(entry)
 
     return {"queue": name, "count": len(tasks), "tasks": tasks}
+
+
+class EnqueueRequest(BaseModel):
+    queue: str
+    task: dict
+
+
+@app.post("/queue/enqueue", tags=["Queues"])
+def enqueue_task(body: EnqueueRequest):
+    """
+    Write a real task JSON file into the specified queue directory.
+
+    ``queue`` must be one of:
+    Needs_Action | Waiting_Approval | Pending_Approval | Done | Retry
+
+    The file is written to VAULT_DIR/Queue/<queue>/<timestamp>_<uuid>.json.
+    Returns { ok, file_path, vault_dir }.
+    """
+    if body.queue not in _ENQUEUE_QUEUE_MAP:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid queue '{body.queue}'. "
+                f"Valid values: {', '.join(_ENQUEUE_QUEUE_MAP)}"
+            ),
+        )
+
+    dest_dir = _ENQUEUE_QUEUE_MAP[body.queue]
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Cannot create queue dir: {exc}")
+
+    now      = datetime.now(timezone.utc)
+    ts       = now.strftime("%Y%m%dT%H%M%SZ")
+    task_id  = str(uuid.uuid4())
+    filename = f"{ts}_{task_id}.json"
+    file_path = dest_dir / filename
+
+    task_data = {
+        "id":        task_id,
+        "timestamp": now.isoformat(),
+        "queue":     body.queue,
+        **body.task,
+    }
+
+    try:
+        file_path.write_text(
+            json.dumps(task_data, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to write task: {exc}")
+
+    return {
+        "ok":        True,
+        "file_path": str(file_path),
+        "vault_dir": str(VAULT_DIR),
+    }
 
 
 @app.get("/task/{queue}/{filename}", tags=["Queues"])
