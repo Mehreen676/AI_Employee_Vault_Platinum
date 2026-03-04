@@ -35,12 +35,20 @@ export interface ExecutionEntry {
   [key: string]: unknown;
 }
 
+export interface WatchdogComponent {
+  status: string;       // "online" | "offline"
+  last_seen: string | null;
+}
+
 export interface VaultStatus {
   vault_root: string;
   queues: Record<string, number>;
   cloud_updates: string[];
   last_executions: ExecutionEntry[];
   last_health: HealthEntry | null;
+  agent_status?: string;
+  last_heartbeat?: string | null;
+  watchdog?: Record<string, WatchdogComponent>;
   time: string;
 }
 

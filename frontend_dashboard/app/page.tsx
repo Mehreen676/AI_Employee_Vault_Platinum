@@ -187,7 +187,7 @@ export default function OverviewPage() {
             ◉ Open Judge Proof
           </button>
           <a
-            href={`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:7860'}/docs`}
+            href={`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/docs`}
             target="_blank"
             rel="noopener noreferrer"
             className="btn-ghost"
@@ -281,7 +281,7 @@ export default function OverviewPage() {
       </div>
 
       {/* Watchdog health */}
-      {status?.last_health && (
+      {(status?.last_health || status?.watchdog) && (
         <section className="mt-6">
           <p className="text-xs font-semibold uppercase tracking-widest text-vault-dim mb-3">
             Watchdog Health
@@ -289,10 +289,15 @@ export default function OverviewPage() {
           <div className="vault-card p-5">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
               {(['cloud_agent', 'gmail_watcher', 'local_executor'] as const).map((key) => {
-                const proc = status.last_health![key as keyof typeof status.last_health] as
+                // Prefer watchdog object (new); fall back to last_health legacy shape
+                const wd    = status?.watchdog?.[key];
+                const proc  = status?.last_health?.[key as keyof typeof status.last_health] as
                   | { alive?: boolean; pid?: number; restarts?: number }
                   | undefined;
-                const alive = proc?.alive;
+                const alive = wd ? wd.status === 'online' : proc?.alive;
+                const sub   = wd
+                  ? (alive ? ts(wd.last_seen ?? undefined) : 'offline')
+                  : (alive ? `PID ${proc?.pid ?? '?'}` : 'offline');
                 return (
                   <div key={key} className="flex items-center gap-2.5">
                     <span className={`w-2 h-2 rounded-full shrink-0 ${alive ? 'bg-vault-green' : 'bg-vault-red'}`} />
@@ -301,8 +306,8 @@ export default function OverviewPage() {
                         {key.replace(/_/g, ' ')}
                       </p>
                       <p className="text-vault-dim font-mono">
-                        {alive ? `PID ${proc?.pid ?? '?'}` : 'offline'}
-                        {(proc?.restarts ?? 0) > 0 && ` · ${proc?.restarts}↺`}
+                        {sub}
+                        {!wd && (proc?.restarts ?? 0) > 0 && ` · ${proc?.restarts}↺`}
                       </p>
                     </div>
                   </div>
@@ -313,7 +318,7 @@ export default function OverviewPage() {
                 <div>
                   <p className="font-medium text-vault-text">Cycle</p>
                   <p className="text-vault-dim font-mono">
-                    #{(status.last_health as Record<string, unknown>)['cycle'] as number ?? '—'}
+                    #{(status?.last_health as Record<string, unknown> | null | undefined)?.['cycle'] as number ?? '—'}
                   </p>
                 </div>
               </div>

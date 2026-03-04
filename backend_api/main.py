@@ -268,6 +268,37 @@ def _parse_task(path: Path) -> dict[str, Any]:
         return {"_parse_error": str(exc), "filename": path.name}
 
 
+def _compute_watchdog() -> dict:
+    """
+    Build the per-component watchdog status object included in /status.
+
+    cloud_agent:    online if agent_heartbeat.json exists and is < 15 s old.
+    gmail_watcher:  always offline (no dedicated heartbeat file in this setup).
+    local_executor: always offline (no dedicated heartbeat file in this setup).
+    """
+    def _component(path: Path, threshold_s: float = 15.0) -> dict:
+        if not path.exists():
+            return {"status": "offline", "last_seen": None}
+        try:
+            data   = json.loads(path.read_text(encoding="utf-8"))
+            ts_str = data.get("timestamp")
+            if ts_str:
+                ts     = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                age    = (datetime.now(timezone.utc) - ts).total_seconds()
+                status = "online" if age < threshold_s else "offline"
+            else:
+                status, ts_str = "offline", None
+            return {"status": status, "last_seen": ts_str}
+        except Exception:
+            return {"status": "offline", "last_seen": None}
+
+    return {
+        "cloud_agent":    _component(LOG_DIR / "agent_heartbeat.json", 15.0),
+        "gmail_watcher":  {"status": "offline", "last_seen": None},
+        "local_executor": {"status": "offline", "last_seen": None},
+    }
+
+
 def _read_heartbeat(path: Path) -> dict:
     """
     Read agent_heartbeat.json and return agent_status + last_heartbeat.
@@ -347,6 +378,7 @@ def status():
     last_execution = _tail_jsonl(LOG_DIR / "execution_log.json", 5)
     last_health    = _tail_jsonl(LOG_DIR / "health_log.json", 1)
     hb             = _read_heartbeat(LOG_DIR / "agent_heartbeat.json")
+    watchdog       = _compute_watchdog()
 
     return {
         "vault_root":      str(VAULT_ROOT),
@@ -357,6 +389,7 @@ def status():
         "last_health":     last_health[0] if last_health else None,
         "agent_status":    hb["agent_status"],
         "last_heartbeat":  hb["last_heartbeat"],
+        "watchdog":        watchdog,
         "time":            datetime.now(timezone.utc).isoformat(),
     }
 
