@@ -110,16 +110,13 @@ def _append_log(path: Path, record: dict) -> None:
 @app.on_event("startup")
 def _startup_init() -> None:
     """
-    Guarantee writable directories, seed log files, and optionally seed demo
-    tasks on every cold start.
+    Guarantee writable directories and seed empty log files on every cold start.
 
-    HuggingFace Spaces: /app is read-only — all mutable state under /tmp.
+    HuggingFace Spaces: /app is read-only — all mutable state lives under /tmp.
       VAULT_DIR    = /tmp/vault              (VAULT_DIR env var)
       QUEUE_DIR    = /tmp/vault/Queue        (derived)
       LOG_DIR      = /tmp/vault/Logs         (VAULT_LOG_DIR env var)
       EVIDENCE_DIR = /tmp/vault/Evidence     (EVIDENCE_OUT_DIR env var)
-
-    Set DEMO_SEED_TASKS=true to auto-populate queues with sample tasks.
     """
     # ── Create all required directories ───────────────────────────────────────
     for _d in (
@@ -146,61 +143,6 @@ def _startup_init() -> None:
                 _fpath.write_text("", encoding="utf-8")
         except OSError:
             pass
-
-    # ── Demo task seeding (DEMO_SEED_TASKS=true) ───────────────────────────────
-    if os.getenv("DEMO_SEED_TASKS", "false").lower() == "true":
-        _seed_dirs = [
-            QUEUE_DIRS["needs_action"],
-            QUEUE_DIRS["pending_approval"],
-            QUEUE_DIRS["done"],
-        ]
-        # Only seed when every target queue is empty (don't overwrite real tasks)
-        _all_empty = all(
-            not any(True for _ in _d.iterdir())
-            for _d in _seed_dirs
-            if _d.exists()
-        )
-        if _all_empty:
-            _ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            _seed_tasks = [
-                (QUEUE_DIRS["needs_action"], f"task_seed_na_{_ts}.json", {
-                    "id": f"seed-na-{_ts}",
-                    "task_type": "email_review",
-                    "action": "review_incoming_email",
-                    "status": "pending",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "from": "demo@company.com",
-                    "subject": "Q1 Budget Review Request",
-                    "source": "demo_seed",
-                }),
-                (QUEUE_DIRS["pending_approval"], f"task_seed_pa_{_ts}.json", {
-                    "id": f"seed-pa-{_ts}",
-                    "task_type": "schedule_meeting",
-                    "action": "schedule_q1_review",
-                    "status": "pending_approval",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "subject": "Q1 Executive Review – Awaiting Approval",
-                    "source": "demo_seed",
-                }),
-                (QUEUE_DIRS["done"], f"task_seed_done_{_ts}.json", {
-                    "id": f"seed-done-{_ts}",
-                    "task_type": "data_export",
-                    "action": "export_q4_report",
-                    "status": "completed",
-                    "result": "success",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "subject": "Q4 Annual Report Export",
-                    "source": "demo_seed",
-                }),
-            ]
-            for _dir, _fname, _data in _seed_tasks:
-                try:
-                    (_dir / _fname).write_text(
-                        json.dumps(_data, indent=2, ensure_ascii=False),
-                        encoding="utf-8",
-                    )
-                except OSError:
-                    pass
 
 
 # ── Root ──────────────────────────────────────────────────────────────────────
@@ -230,7 +172,7 @@ def _safe_filename(filename: str) -> str:
 def _count_dir(path: Path) -> int:
     if not path.exists():
         return 0
-    return sum(1 for f in path.iterdir() if f.is_file())
+    return sum(1 for f in path.iterdir() if f.is_file() and not f.name.startswith("."))
 
 
 def _tail_jsonl(path: Path, n: int) -> list[dict]:
