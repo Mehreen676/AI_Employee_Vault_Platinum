@@ -9,6 +9,14 @@
 ![Architecture](https://img.shields.io/badge/architecture-Distributed%20AI-orange)
 ![Cloud](https://img.shields.io/badge/cloud-Oracle%20OCI%20%2B%20HuggingFace-lightblue)
 ![HITL](https://img.shields.io/badge/HITL-Human--in--the--Loop-critical)
+![Gmail Integration](https://img.shields.io/badge/Gmail-Integration-red)
+![Slack Integration](https://img.shields.io/badge/Slack-Integration-blueviolet)
+![WhatsApp Integration](https://img.shields.io/badge/WhatsApp-Integration-brightgreen)
+![Voice Commands](https://img.shields.io/badge/Voice-Commands-blue)
+![Metrics API](https://img.shields.io/badge/Metrics-API-informational)
+![Health Monitoring](https://img.shields.io/badge/Health-Monitoring-orange)
+![CEO Auto Report](https://img.shields.io/badge/CEO-Auto%20Report-gold)
+![AI Decision Logs](https://img.shields.io/badge/AI%20Decision-Logs-lightblue)
 
 **Version:** 1.4.0 | **Tier:** Platinum (Enterprise Distributed) | **Cloud:** Oracle OCI (me-dubai-1) + HuggingFace Spaces
 
