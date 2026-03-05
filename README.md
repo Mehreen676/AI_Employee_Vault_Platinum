@@ -94,11 +94,9 @@ This is not a demo. This is a production-class distributed system designed for o
 
 ## Platinum System Architecture (Overview)
 
-![Platinum Architecture](Evidence/PLATINUM_ARCHITECTURE_V2.png)
+<img src="docs/architecture/platinum_system_architecture.png" width="1000" />
 
 > Full diagram source + Mermaid version: [Evidence/PLATINUM_ARCHITECTURE_V2.md](Evidence/PLATINUM_ARCHITECTURE_V2.md)
->
-> Regenerate: `python tools/generate_architecture_v2.py`
 
 The Platinum Tier is a **fully distributed, 7-layer AI pipeline**:
 
@@ -114,41 +112,35 @@ The Platinum Tier is a **fully distributed, 7-layer AI pipeline**:
 
 ---
 
-## Detailed System Flow
+## Detailed System Flow (Zoomed, Readable)
 
-The Platinum Tier is a **fully distributed, multi-layer AI pipeline** with strict separation of concerns between cloud intelligence, human approval, and local execution.
-
-### Full Overview
-
-![Platinum System Architecture](docs/architecture/platinum_system_architecture.png)
-
-### Zoomed Views (Readable)
+Each section below is a standalone high-resolution render of one pipeline stage.
 
 **Layer 1–2 · Input → Cloud AI**
 Gmail Watcher and Manual Drop feed tasks into Needs_Action/; Cloud Agent claims them via atomic rename and generates task manifests.
 
-![Input and Cloud AI Layers](docs/architecture/zoom_1_input_cloud.png)
+<img src="docs/architecture/zoom_1_input_cloud.png" width="900" />
 
 ---
 
 **Layer 3 · Human-In-The-Loop Gate**
 High-risk tasks (payments, social, bulk email) are intercepted by the HITL Gate. Only a human can approve or reject before execution proceeds.
 
-![Human-In-The-Loop Gate](docs/architecture/zoom_2_hitl.png)
+<img src="docs/architecture/zoom_2_hitl.png" width="900" />
 
 ---
 
 **Layer 4 · Local Executor + MCP Tools**
 Local Executor claims approved tasks and dispatches to the MCP Tool Layer (Email, Calendar, File, Social, Odoo XML-RPC). Rate Limiter and Retry Logic wrap all tool calls.
 
-![Local Executor and MCP Tool Layer](docs/architecture/zoom_3_executor_tools.png)
+<img src="docs/architecture/zoom_3_executor_tools.png" width="900" />
 
 ---
 
 **Layers 5–7 · Vault State Machine · Output · System Services**
 Completed tasks land in Done/; failures go to Retry_Queue/. Watchdog supervises all 3 processes. Evidence Pack and CEO Briefing are generated from execution and health logs.
 
-![Vault State Machine, Output and System Services](docs/architecture/zoom_4_vault_outputs.png)
+<img src="docs/architecture/zoom_4_vault_outputs.png" width="900" />
 
 ---
 
