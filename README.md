@@ -1371,9 +1371,10 @@ Why systemd is preferred over tmux/nohup:
 
 ## Development Notes
 
-This project was primarily designed and implemented by the authors.
+This project was primarily designed and implemented by Mehreen Asghar.
 
 AI-assisted development tools were occasionally used for productivity
-(such as Claude and small Codex suggestions for refactoring or boilerplate).
-All architecture, system design decisions, and final code validation
-were performed manually by the developers.
+(e.g., Claude and small Codex suggestions for refactoring or boilerplate).
+
+All architecture decisions, system design, security boundaries, and final
+code validation were performed manually by the developer.
