@@ -28,9 +28,9 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -795,6 +795,219 @@ def generate_evidence(n: int = Query(default=20, ge=1, le=200)):
         "exists":   out_path.exists(),
         "snippet":  snippet,
         "stdout":   result.stdout[:500],
+    }
+
+
+# ── Feature 2: Metrics endpoint ───────────────────────────────────────────────
+
+def _compute_metrics() -> dict:
+    """
+    Compute system-level metrics from vault logs.
+    Returns total_tasks, successes, failures, pending, success_rate, avg_latency_ms.
+    """
+    entries = _tail_jsonl(LOG_DIR / "execution_log.json", 500)
+
+    total    = len(entries)
+    success  = sum(1 for e in entries if e.get("result") == "success")
+    failures = sum(1 for e in entries if isinstance(e.get("result"), str)
+                   and e["result"].startswith("error"))
+    rejected = sum(1 for e in entries if e.get("action") == "rejected")
+    pending  = _count_dir(QUEUE_DIRS["pending_approval"]) + _count_dir(QUEUE_DIRS["waiting_approval"])
+
+    success_rate = round(success / total * 100, 1) if total > 0 else 0.0
+
+    # Execution latency: parse timestamps from consecutive entries (naïve estimate)
+    latencies: list[float] = []
+    for i in range(1, min(len(entries), 50)):
+        try:
+            t1 = datetime.fromisoformat(entries[i - 1]["timestamp"].replace("Z", "+00:00"))
+            t2 = datetime.fromisoformat(entries[i]["timestamp"].replace("Z", "+00:00"))
+            diff = abs((t2 - t1).total_seconds() * 1000)
+            if 0 < diff < 300_000:   # ignore gaps > 5 min
+                latencies.append(diff)
+        except Exception:
+            pass
+    avg_latency_ms = round(sum(latencies) / len(latencies), 1) if latencies else 0.0
+
+    return {
+        "total_tasks":     total,
+        "successes":       success,
+        "failures":        failures,
+        "rejected":        rejected,
+        "pending":         pending,
+        "success_rate_pct": success_rate,
+        "avg_latency_ms":  avg_latency_ms,
+        "queue_snapshot":  {k: _count_dir(v) for k, v in QUEUE_DIRS.items()},
+        "time":            datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/metrics", tags=["Metrics"])
+def get_metrics():
+    """
+    System performance metrics.
+
+    Returns:
+    - total_tasks, successes, failures, rejected, pending
+    - success_rate_pct (0–100)
+    - avg_latency_ms (inter-task timing estimate)
+    - queue_snapshot (live counts for all queues)
+    """
+    return _compute_metrics()
+
+
+# ── Feature 5: Slack webhook ───────────────────────────────────────────────────
+
+@app.post("/slack/webhook", tags=["Integrations"])
+async def slack_webhook(request: Request):
+    """
+    Slack Events API / incoming webhook endpoint.
+
+    Accepts either:
+    - JSON body (Slack Events API format)
+    - Form-encoded body (legacy Slack webhook format)
+
+    Creates a vault task for every actionable message.
+    Logs activity to Evidence/SLACK_INTEGRATION_LOG.md.
+    """
+    # Import here to avoid circular path issues on HF Spaces
+    sys.path.insert(0, str(VAULT_ROOT))
+    try:
+        from integrations.slack_integration import handle_webhook
+    except ImportError:
+        raise HTTPException(status_code=501, detail="Slack integration module not found in VAULT_ROOT")
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        payload = await request.json()
+    else:
+        form = await request.form()
+        payload = dict(form)
+
+    # Inject vault path for the integration module
+    import os as _os
+    _os.environ.setdefault("VAULT_DIR",        str(VAULT_DIR))
+    _os.environ.setdefault("EVIDENCE_OUT_DIR", str(EVIDENCE_DIR))
+
+    result = handle_webhook(payload)
+
+    # Slack URL verification: must return the challenge value
+    if "challenge" in result:
+        return PlainTextResponse(result["challenge"])
+
+    return result
+
+
+# ── Feature 6: WhatsApp webhook ────────────────────────────────────────────────
+
+@app.post("/whatsapp/webhook", tags=["Integrations"])
+async def whatsapp_webhook(request: Request):
+    """
+    Twilio WhatsApp webhook endpoint.
+
+    Twilio sends form-encoded POST data.
+    Creates a vault task for every incoming message.
+    Logs activity to Evidence/WHATSAPP_INTEGRATION_LOG.md.
+    Returns TwiML XML response.
+    """
+    sys.path.insert(0, str(VAULT_ROOT))
+    try:
+        from integrations.whatsapp_integration import handle_webhook
+    except ImportError:
+        raise HTTPException(status_code=501, detail="WhatsApp integration module not found in VAULT_ROOT")
+
+    form = await request.form()
+    form_data = dict(form)
+
+    import os as _os
+    _os.environ.setdefault("VAULT_DIR",        str(VAULT_DIR))
+    _os.environ.setdefault("EVIDENCE_OUT_DIR", str(EVIDENCE_DIR))
+
+    result = handle_webhook(form_data)
+    twiml  = result.pop("twiml", None)
+
+    if twiml:
+        return Response(content=twiml, media_type="application/xml")
+    return result
+
+
+# ── Feature 7: Health monitoring endpoint ─────────────────────────────────────
+
+@app.get("/monitoring/health", tags=["Monitoring"])
+def monitoring_health():
+    """
+    Run a live component health check.
+
+    Checks: cloud_agent · gmail_watcher · local_executor · MCP tool imports.
+    Appends results to Evidence/SYSTEM_HEALTH_REPORT.md.
+    Returns per-component status JSON.
+    """
+    sys.path.insert(0, str(VAULT_ROOT))
+    try:
+        from monitoring.health_monitor import run_check, _ensure_header
+        import os as _os
+        _os.environ.setdefault("VAULT_DIR",        str(VAULT_DIR))
+        _os.environ.setdefault("VAULT_LOG_DIR",    str(LOG_DIR))
+        _os.environ.setdefault("EVIDENCE_OUT_DIR", str(EVIDENCE_DIR))
+        _ensure_header()
+        results = run_check(print_summary=False)
+    except ImportError:
+        # Fallback: return watchdog status from heartbeat files
+        results = [
+            {"name": k, **v}
+            for k, v in _compute_watchdog().items()
+        ]
+
+    all_ok = all(r.get("status") == "online" for r in results)
+    return {
+        "overall": "healthy" if all_ok else "degraded",
+        "components": results,
+        "time": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ── Feature 3: CEO report endpoint ────────────────────────────────────────────
+
+@app.post("/reports/ceo", tags=["Reports"])
+def generate_ceo_report(date: str = Query(default=None, description="Report date YYYY-MM-DD (default: today)")):
+    """
+    Trigger CEO daily report generation.
+    Calls scripts/generate_ceo_report.py.
+    Returns the report path and a snippet.
+    """
+    script = SCRIPTS_DIR / "generate_ceo_report.py"
+    if not script.exists():
+        raise HTTPException(status_code=500, detail=f"Report script not found at {script}")
+
+    cmd = [sys.executable, str(script)]
+    if date:
+        cmd += ["--date", date]
+
+    env = {
+        **os.environ,
+        "VAULT_DIR":        str(VAULT_DIR),
+        "VAULT_LOG_DIR":    str(LOG_DIR),
+        "EVIDENCE_OUT_DIR": str(EVIDENCE_DIR),
+    }
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=30, cwd=str(VAULT_ROOT), env=env)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="CEO report generation timed out.")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Script error: {exc}")
+
+    out_path = EVIDENCE_DIR / "CEO_REPORT.md"
+    snippet  = ""
+    if out_path.exists():
+        snippet = "\n".join(out_path.read_text(encoding="utf-8").splitlines()[:20])
+
+    return {
+        "ok":      result.returncode == 0,
+        "path":    str(out_path),
+        "exists":  out_path.exists(),
+        "snippet": snippet,
+        "stderr":  result.stderr[:300] if result.returncode != 0 else "",
     }
 
 

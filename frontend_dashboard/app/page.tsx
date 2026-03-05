@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, getBackendUrl } from '@/lib/api';
-import { QUEUE_META, type VaultStatus, type GenerateEvidenceResponse } from '@/lib/types';
+import { QUEUE_META, type VaultStatus, type GenerateEvidenceResponse, type MetricsResponse } from '@/lib/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -68,6 +68,8 @@ export default function OverviewPage() {
   const [proofText, setProofText]     = useState('');
   const [proofLoading, setProofLoading] = useState(false);
 
+  const [metrics, setMetrics]         = useState<MetricsResponse | null>(null);
+
   const fetchStatus = useCallback(async () => {
     try {
       const s = await api.status();
@@ -81,11 +83,22 @@ export default function OverviewPage() {
     }
   }, []);
 
+  const fetchMetrics = useCallback(async () => {
+    try {
+      const m = await api.metrics();
+      setMetrics(m);
+    } catch {
+      // metrics panel silently hides on error — main status banner covers backend offline
+    }
+  }, []);
+
   useEffect(() => {
     fetchStatus();
-    const id = setInterval(fetchStatus, 8_000);
-    return () => clearInterval(id);
-  }, [fetchStatus]);
+    fetchMetrics();
+    const id  = setInterval(fetchStatus, 8_000);
+    const mid = setInterval(fetchMetrics, 30_000);
+    return () => { clearInterval(id); clearInterval(mid); };
+  }, [fetchStatus, fetchMetrics]);
 
   const handleGenerate = async () => {
     setGenLoading(true);
@@ -235,6 +248,43 @@ export default function OverviewPage() {
           ))}
         </div>
       </section>
+
+      {/* System Metrics */}
+      {metrics && (
+        <section className="mb-8">
+          <p className="text-xs font-semibold uppercase tracking-widest text-vault-dim mb-3">
+            System Metrics
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="vault-card p-4 border border-vault-green/30">
+              <p className="text-2xl font-bold font-mono text-vault-green">{metrics.total_tasks}</p>
+              <p className="text-sm font-semibold text-vault-text mt-1">Processed Tasks</p>
+              <p className="text-xs text-vault-muted mt-0.5">
+                {metrics.success_rate_pct.toFixed(1)}% success rate
+              </p>
+            </div>
+            <div className="vault-card p-4 border border-vault-red/30">
+              <p className="text-2xl font-bold font-mono text-vault-red">{metrics.failures}</p>
+              <p className="text-sm font-semibold text-vault-text mt-1">Failed Tasks</p>
+              <p className="text-xs text-vault-muted mt-0.5">
+                {metrics.rejected > 0 ? `+ ${metrics.rejected} rejected` : 'No rejections'}
+              </p>
+            </div>
+            <div className="vault-card p-4 border border-vault-gold/30">
+              <p className="text-2xl font-bold font-mono text-vault-gold">{metrics.pending}</p>
+              <p className="text-sm font-semibold text-vault-text mt-1">Pending Approvals</p>
+              <p className="text-xs text-vault-muted mt-0.5">Awaiting HITL gate</p>
+            </div>
+            <div className="vault-card p-4 border border-vault-cyan/30">
+              <p className="text-2xl font-bold font-mono text-vault-cyan">
+                {metrics.avg_latency_ms > 0 ? `${metrics.avg_latency_ms.toFixed(0)}ms` : '—'}
+              </p>
+              <p className="text-sm font-semibold text-vault-text mt-1">Avg Execution Time</p>
+              <p className="text-xs text-vault-muted mt-0.5">Per task latency</p>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Action buttons */}
       <section className="mb-8">

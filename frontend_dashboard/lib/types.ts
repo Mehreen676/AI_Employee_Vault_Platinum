@@ -105,6 +105,18 @@ export interface ApprovalResponse {
   moved_to?: string;
 }
 
+export interface MetricsResponse {
+  total_tasks: number;
+  successes: number;
+  failures: number;
+  rejected: number;
+  pending: number;
+  success_rate_pct: number;
+  avg_latency_ms: number;
+  queue_snapshot: Record<string, number>;
+  time: string;
+}
+
 // ── UI helper types ──────────────────────────────────────────────────────────
 
 export type QueueName =

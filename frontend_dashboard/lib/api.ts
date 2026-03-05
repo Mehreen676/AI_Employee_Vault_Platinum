@@ -7,6 +7,7 @@ import type {
   EvidenceListResponse,
   GenerateEvidenceResponse,
   ApprovalResponse,
+  MetricsResponse,
 } from './types';
 
 // ── Base fetch ────────────────────────────────────────────────────────────────
@@ -59,6 +60,7 @@ export const api = {
   // System
   health: () => apiFetch<HealthResponse>('/health'),
   status: () => apiFetch<VaultStatus>('/status'),
+  metrics: () => apiFetch<MetricsResponse>('/metrics'),
 
   // Queues
   queue: (name: string, limit = 50) =>
