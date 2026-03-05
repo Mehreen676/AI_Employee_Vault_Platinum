@@ -1365,3 +1365,15 @@ Why systemd is preferred over tmux/nohup:
 - Boot persistence: services start on reboot automatically.
 - Auto-restart: `Restart=always` recovers from crashes without operator action.
 - Verifiable evidence: `systemctl status` and `journalctl` provide auditable OS-level proof.
+
+
+---
+
+## Development Notes
+
+This project was primarily designed and implemented by the authors.
+
+AI-assisted development tools were occasionally used for productivity
+(such as Claude and small Codex suggestions for refactoring or boilerplate).
+All architecture, system design decisions, and final code validation
+were performed manually by the developers.
