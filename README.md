@@ -20,6 +20,25 @@
 |---|---|
 | **Frontend (Vercel)** | https://ai-employee-vault-platinum.vercel.app |
 | **Backend (Hugging Face Space)** | https://mehreenasghar5-ai-employee-vault-backend.hf.space |
+| **Backend Status** | https://mehreenasghar5-ai-employee-vault-backend.hf.space/status |
+| **Execution Logs** | https://mehreenasghar5-ai-employee-vault-backend.hf.space/logs/execution |
+
+---
+
+## 🎬 Judge Quick Demo
+
+1. Open dashboard: https://ai-employee-vault-platinum.vercel.app
+2. Observe Cloud Agent heartbeat (live updates every few seconds)
+3. Verify Watchdog Health (Cloud Agent, Gmail Watcher, Local Executor)
+4. Click **Generate Evidence Pack** in the dashboard
+5. Inspect Evidence artifacts and execution logs
+
+Backend verification endpoints:
+
+| Endpoint | URL |
+|---|---|
+| **Backend Status** | https://mehreenasghar5-ai-employee-vault-backend.hf.space/status |
+| **Execution Logs** | https://mehreenasghar5-ai-employee-vault-backend.hf.space/logs/execution |
 
 ---
 
