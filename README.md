@@ -52,6 +52,16 @@ Backend verification endpoints:
 
 ---
 
+## 🏛️ Enterprise Architecture Note
+
+The dashboard is only the monitoring interface.
+WhatsApp, Gmail, Slack and Voice are external input channels that trigger tasks through webhooks.
+The dashboard then visualizes system state, metrics and evidence.
+
+This follows an enterprise AI orchestration architecture where external communication channels act as inputs while the dashboard provides centralized observability.
+
+---
+
 ## ⚡ Quick Judge Run (3 Commands)
 
 For fast evaluation, judges can verify the **full distributed AI pipeline** in under a minute:
