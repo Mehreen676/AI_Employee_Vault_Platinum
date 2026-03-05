@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { api, getBackendUrl } from '@/lib/api';
 import { QUEUE_META, type VaultStatus, type GenerateEvidenceResponse } from '@/lib/types';
 
@@ -116,6 +116,68 @@ export default function OverviewPage() {
   };
 
   const q = status?.queues ?? {};
+
+  // ── Execution flow steps (derived from /status — no extra fetch needed) ─────
+  const flowSteps = (() => {
+    // Step 1: Task Ingest — API reachable and queues object present
+    const queueOnline = !error && !!status?.queues;
+    const queueTotal  = Object.values(status?.queues ?? {}).reduce((a, b) => a + b, 0);
+
+    // Step 2: Agent Processing
+    const cloudAgent  = status?.watchdog?.cloud_agent;
+    const agentOnline = cloudAgent?.status === 'online';
+
+    // Step 3: Executor
+    const localExec   = status?.watchdog?.local_executor;
+    const execOnline  = localExec?.status === 'online';
+
+    // Step 4: Evidence — evidence_generation success entry within last 24 h
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1_000;
+    const lastEvidence = [...(status?.last_executions ?? [])]
+      .filter(e => e.task_type === 'evidence_generation' && e.result === 'success')
+      .sort((a, b) =>
+        new Date(String(b.timestamp ?? 0)).getTime() -
+        new Date(String(a.timestamp ?? 0)).getTime()
+      )[0];
+    const evidenceOnline =
+      !!lastEvidence &&
+      new Date(String(lastEvidence.timestamp ?? 0)).getTime() > oneDayAgo;
+
+    return [
+      {
+        key:      'ingest',
+        icon:     '📥',
+        label:    'Task Ingest',
+        caption:  'Vault queue — API reachable',
+        online:   queueOnline,
+        lastSeen: queueOnline ? `${queueTotal} task${queueTotal !== 1 ? 's' : ''} total` : 'unreachable',
+      },
+      {
+        key:      'agent',
+        icon:     '☁',
+        label:    'Agent Processing',
+        caption:  'Cloud Agent loop',
+        online:   agentOnline,
+        lastSeen: cloudAgent?.last_seen ? ts(cloudAgent.last_seen) : '—',
+      },
+      {
+        key:      'executor',
+        icon:     '⚙',
+        label:    'Executor',
+        caption:  'Local Executor',
+        online:   execOnline,
+        lastSeen: localExec?.last_seen ? ts(localExec.last_seen) : '—',
+      },
+      {
+        key:      'evidence',
+        icon:     '◉',
+        label:    'Evidence',
+        caption:  'Evidence pack generated',
+        online:   evidenceOnline,
+        lastSeen: lastEvidence?.timestamp ? ts(String(lastEvidence.timestamp)) : '—',
+      },
+    ];
+  })();
 
   return (
     <main className="flex-1 px-8 py-8 max-w-7xl">
@@ -340,6 +402,37 @@ export default function OverviewPage() {
           </div>
         </section>
       )}
+
+      {/* Execution Flow (End-to-End) */}
+      <section className="mt-6">
+        <p className="text-xs font-semibold uppercase tracking-widest text-vault-dim mb-3">
+          Execution Flow (End-to-End)
+        </p>
+        <div className="vault-card p-5">
+          <div className="flex flex-col md:flex-row items-center gap-1">
+            {flowSteps.map((step, i) => (
+              <React.Fragment key={step.key}>
+                {/* Step card */}
+                <div className={`flex-1 w-full p-3 rounded-lg bg-vault-bg border flex flex-col gap-1.5 ${step.online ? 'border-vault-green/30' : 'border-vault-border/50'}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${loading ? 'bg-vault-dim animate-pulse' : step.online ? 'bg-vault-green' : 'bg-vault-red'}`} />
+                    <span className="text-xs font-semibold text-vault-text">{step.icon} {step.label}</span>
+                  </div>
+                  <p className="text-xs text-vault-muted">{step.caption}</p>
+                  <p className="text-xs font-mono text-vault-dim truncate">{step.lastSeen}</p>
+                </div>
+                {/* Connector — right arrow on md+, down arrow on mobile */}
+                {i < flowSteps.length - 1 && (
+                  <span className="text-vault-dim text-sm font-mono shrink-0 px-1 hidden md:block">→</span>
+                )}
+                {i < flowSteps.length - 1 && (
+                  <span className="text-vault-dim text-sm font-mono shrink-0 py-0.5 md:hidden">↓</span>
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* Debug info bar — shows API base URL + key status fields for dev/judges */}
       <div className="mt-6 p-3 rounded-lg bg-vault-bg border border-vault-border/30 font-mono text-xs text-vault-dim space-y-0.5">
