@@ -114,93 +114,14 @@ The Platinum Tier is a **fully distributed, 7-layer AI pipeline**:
 
 ---
 
-## Detailed System Flow (Mermaid)
+## Detailed System Flow
 
 The Platinum Tier is a **fully distributed, multi-layer AI pipeline** with strict separation of concerns between cloud intelligence, human approval, and local execution.
 
-```mermaid
-%%{init: {"theme": "dark", "flowchart": {"nodeSpacing": 80, "rankSpacing": 120, "curve": "basis"}, "themeVariables": {"fontSize": "18px"}}}%%
-flowchart TB
-    classDef inputStyle  fill:#1a3a5c,stroke:#4fc3f7,color:#e3f2fd,stroke-width:3px
-    classDef cloudStyle  fill:#1b3a2d,stroke:#66bb6a,color:#e8f5e9,stroke-width:3px
-    classDef vaultStyle  fill:#3e2723,stroke:#ff8a65,color:#fbe9e7,stroke-width:3px
-    classDef hitlStyle   fill:#311b92,stroke:#ce93d8,color:#f3e5f5,stroke-width:3px
-    classDef localStyle  fill:#0d2137,stroke:#42a5f5,color:#e3f2fd,stroke-width:3px
-    classDef toolsStyle  fill:#1a237e,stroke:#7986cb,color:#e8eaf6,stroke-width:3px
-    classDef svcStyle    fill:#1b2a1b,stroke:#a5d6a7,color:#f1f8e9,stroke-width:3px
-    classDef outputStyle fill:#4a148c,stroke:#f48fb1,color:#fce4ec,stroke-width:3px
+![Platinum System Architecture](docs/architecture/platinum_system_architecture.png)
 
-    subgraph INPUT["📥 INPUT LAYER"]
-        GW["📧 Gmail Watcher\ngmail_watcher.py"]
-        MD["📂 Manual Drop\nNeeds_Action/"]
-    end
-
-    subgraph CLOUD["☁️ CLOUD LAYER  (HuggingFace Spaces — Always-On 24/7)"]
-        CA["🤖 Cloud Agent v1.4.0\nClaim-by-move · Daemon mode"]
-        TP["🧠 Task Planning\ntask_generator.py"]
-        PG["✍️ Prompt Generation\nSHA-256 hash chain"]
-        CA --> TP --> PG
-    end
-
-    subgraph VAULT["🗄️ VAULT STATE MACHINE  (File-System Communication Bus)"]
-        direction LR
-        NA["📋 Needs_Action/"] --> PA["📬 Pending_Approval/"] --> AP["✅ Approved/"] --> DN["✔️ Done/"]
-        AP --> RQ["🔄 Retry_Queue/"]
-        PA --> LG["📊 Logs/"]
-    end
-
-    subgraph HITL["👤 HITL LAYER  (Human-In-The-Loop Gate)"]
-        HG["🚧 HITL Gate\nhitl.py"]
-        HA["✅ Human Approval\napprove.py"]
-        HG --> HA
-    end
-
-    subgraph LOCAL["💻 LOCAL EXECUTION  (On-Premise)"]
-        LE["⚙️ Local Executor v1.3.0\nSingle-writer for Dashboard.md"]
-        MT["🔧 MCP Tool Layer\nrouter.py · registry.py"]
-        LE --> MT
-    end
-
-    subgraph TOOLS["🛠️ MCP TOOLS"]
-        EM["📧 Email MCP"] & CM["📅 Calendar MCP"] & FM["📁 File MCP"] & SM["📱 Social MCP"] & OD["🏢 Odoo\nXML-RPC draft-only"]
-    end
-
-    subgraph SERVICES["⚙️ SYSTEM SERVICES"]
-        WD["🐕 Watchdog\nAuto-restart"] & RL["⏱️ Rate Limiter\nemail≤10/hr · pay≤3/day"] & RT["🔁 Retry Logic\nExponential backoff"] & PL["📝 Prompt Logger\nSHA-256 · Append-only"]
-    end
-
-    subgraph OUTPUT["📤 OUTPUT LAYER"]
-        EL["📋 Execution Logs"] & EP["🔍 Evidence Pack\nJUDGE_PROOF.md"] & CB["📊 CEO Briefing"] & HL["💚 Health Logs"]
-    end
-
-    GW -->|"atomic rename"| NA
-    MD --> NA
-    NA -->|"claim-by-move"| CA
-    CA -->|"task manifest"| PA
-    PA -->|"HITL check"| HG
-    HA -->|"moves to Approved/"| AP
-    PA -->|"low-risk auto"| AP
-    AP -->|"claim-by-move"| LE
-    MT --> EM & CM & FM & SM & OD
-    LE -->|"success"| DN
-    LE -->|"failure"| RQ
-    LE --> EL
-    WD -.->|"supervises"| CA & GW & LE
-    WD --> HL
-    RL -.->|"gates"| GW & LE
-    EL & HL & PL -->|"read by"| EP
-    EL --> CB
-
-    class GW,MD inputStyle
-    class CA,TP,PG cloudStyle
-    class NA,PA,AP,DN,RQ,LG vaultStyle
-    class HG,HA hitlStyle
-    class LE,MT localStyle
-    class EM,CM,FM,SM,OD toolsStyle
-    class WD,RL,RT,PL svcStyle
-    class EL,EP,CB,HL outputStyle
-```
-
+> Architecture source (Mermaid): [Evidence/PLATINUM_ARCHITECTURE_V2.md](Evidence/PLATINUM_ARCHITECTURE_V2.md)
+>
 > Full architecture details with data-flow diagrams, claim-by-move protocol, and permission boundary matrix:
 > [Evidence/PLATINUM_ARCHITECTURE.md](Evidence/PLATINUM_ARCHITECTURE.md)
 
