@@ -92,7 +92,7 @@ This is not a demo. This is a production-class distributed system designed for o
 
 ---
 
-## Platinum System Architecture
+## Platinum System Architecture (Overview)
 
 ![Platinum Architecture](Evidence/PLATINUM_ARCHITECTURE_V2.png)
 
@@ -114,20 +114,21 @@ The Platinum Tier is a **fully distributed, 7-layer AI pipeline**:
 
 ---
 
-## System Architecture (Mermaid)
+## Detailed System Flow (Mermaid)
 
 The Platinum Tier is a **fully distributed, multi-layer AI pipeline** with strict separation of concerns between cloud intelligence, human approval, and local execution.
 
 ```mermaid
+%%{init: {"theme": "dark", "flowchart": {"nodeSpacing": 80, "rankSpacing": 120, "curve": "basis"}, "themeVariables": {"fontSize": "18px"}}}%%
 flowchart TB
-    classDef inputStyle  fill:#1a3a5c,stroke:#4fc3f7,color:#e3f2fd,stroke-width:2px
-    classDef cloudStyle  fill:#1b3a2d,stroke:#66bb6a,color:#e8f5e9,stroke-width:2px
-    classDef vaultStyle  fill:#3e2723,stroke:#ff8a65,color:#fbe9e7,stroke-width:2px
-    classDef hitlStyle   fill:#311b92,stroke:#ce93d8,color:#f3e5f5,stroke-width:2px
-    classDef localStyle  fill:#0d2137,stroke:#42a5f5,color:#e3f2fd,stroke-width:2px
-    classDef toolsStyle  fill:#1a237e,stroke:#7986cb,color:#e8eaf6,stroke-width:2px
-    classDef svcStyle    fill:#1b2a1b,stroke:#a5d6a7,color:#f1f8e9,stroke-width:2px
-    classDef outputStyle fill:#4a148c,stroke:#f48fb1,color:#fce4ec,stroke-width:2px
+    classDef inputStyle  fill:#1a3a5c,stroke:#4fc3f7,color:#e3f2fd,stroke-width:3px
+    classDef cloudStyle  fill:#1b3a2d,stroke:#66bb6a,color:#e8f5e9,stroke-width:3px
+    classDef vaultStyle  fill:#3e2723,stroke:#ff8a65,color:#fbe9e7,stroke-width:3px
+    classDef hitlStyle   fill:#311b92,stroke:#ce93d8,color:#f3e5f5,stroke-width:3px
+    classDef localStyle  fill:#0d2137,stroke:#42a5f5,color:#e3f2fd,stroke-width:3px
+    classDef toolsStyle  fill:#1a237e,stroke:#7986cb,color:#e8eaf6,stroke-width:3px
+    classDef svcStyle    fill:#1b2a1b,stroke:#a5d6a7,color:#f1f8e9,stroke-width:3px
+    classDef outputStyle fill:#4a148c,stroke:#f48fb1,color:#fce4ec,stroke-width:3px
 
     subgraph INPUT["📥 INPUT LAYER"]
         GW["📧 Gmail Watcher\ngmail_watcher.py"]
