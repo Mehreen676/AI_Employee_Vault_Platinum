@@ -42,19 +42,6 @@ Backend verification endpoints:
 
 ---
 
-## 🧪 How Judges Can Test
-
-1. Open the frontend dashboard: https://ai-employee-vault-platinum.vercel.app
-2. The system automatically connects to the backend hosted on Hugging Face.
-3. Judges can:
-   - View system overview (vault queue counts, real-time task state)
-   - Observe Cloud Agent heartbeat (live entries every few seconds)
-   - Generate Evidence Pack (cryptographic audit report)
-   - Inspect Watchdog Health (per-component online/offline status)
-   - Verify agent execution logs via the API Docs link
-
----
-
 ## ⚙️ Architecture
 
 | Layer | Technology |
@@ -270,12 +257,34 @@ Step 8  🔍  Evidence pack is generated
 ```
 AI_Employee_Vault_Platinum/
 │
-├── cloud_agent/              # Cloud Agent package — task generation, claim-by-move, daemon mode
-│   ├── agent.py              # CloudAgent v1.4.0 — core implementation
+├── backend_api/              # FastAPI backend — deployed on HuggingFace Spaces
+│   ├── main.py               # FastAPI app — /status, /health, /queue/*, /evidence/* endpoints
+│   ├── agent/                # Cloud Agent daemon thread (queue processor + heartbeat)
+│   │   └── cloud_agent.py    # run_cloud_agent_loop() — Needs_Action → Waiting_Approval → Done
+│   ├── executor/             # Local Executor daemon thread
+│   │   └── local_executor.py # run_local_executor_loop() — heartbeat worker
+│   ├── watchers/             # Gmail Watcher daemon thread
+│   │   └── gmail_watcher.py  # run_gmail_watcher_loop() — heartbeat worker
+│   ├── run_agent.py          # CLI entry point for cloud agent loop
+│   ├── Dockerfile            # HuggingFace Spaces container definition
+│   └── requirements.txt      # Python dependencies
+│
+├── frontend_dashboard/       # Next.js dashboard — deployed on Vercel
+│   ├── app/
+│   │   └── page.tsx          # Overview page — queues, heartbeat, watchdog, execution flow
+│   ├── components/           # UI components (Sidebar, etc.)
+│   ├── lib/                  # API client, types, utilities
+│   ├── vercel.json           # Vercel deployment config (sets NEXT_PUBLIC_BACKEND_URL)
+│   └── tailwind.config.js    # Futuristic vault theme
+│
+├── hf_space_backend/         # Mirror of backend_api/ — separate git repo for HF Space push
+│
+├── cloud_agent/              # Original Cloud Agent package (local/VM mode)
+│   ├── agent.py              # CloudAgent v1.4.0 — task generation, claim-by-move, daemon
 │   └── task_generator.py     # Standalone task generation utility
 │
-├── local_executor/           # Local Executor package — task processing, Dashboard.md writer
-│   ├── executor.py           # LocalExecutor v1.3.0 — core implementation
+├── local_executor/           # Local Executor package (local/VM mode)
+│   ├── executor.py           # LocalExecutor v1.3.0 — task processing, Dashboard.md writer
 │   └── watcher.py            # Polling watcher entrypoint
 │
 ├── watchers/                 # Input watchers — feed vault/Needs_Action/
@@ -291,13 +300,11 @@ AI_Employee_Vault_Platinum/
 │   └── registry.py           # Tool registry — maps task types to MCP handlers
 │
 ├── scripts/                  # Operational scripts
-│   ├── systemd/                   # Production systemd unit files (Ubuntu 22.04)
-│   │   ├── ai-vault-cloud-agent.service   # Cloud Agent — always-on, auto-restart
-│   │   └── ai-vault-local-executor.service# Local Executor — always-on, auto-restart
-│   ├── generate_briefing.py       # CEO daily briefing automation
-│   ├── cleanup_old_logs.py        # 90-day audit log retention
+│   ├── systemd/              # Production systemd unit files (Ubuntu 22.04)
+│   ├── generate_briefing.py  # CEO daily briefing automation
+│   ├── cleanup_old_logs.py   # 90-day audit log retention
 │   ├── generate_evidence_pack.py  # Writes Evidence/JUDGE_PROOF.md
-│   └── run_daily_audit.py         # Daily audit runner
+│   └── run_daily_audit.py    # Daily audit runner
 │
 ├── tools/                    # Internal utility tools
 │   ├── generate_architecture_diagram.py
@@ -308,52 +315,43 @@ AI_Employee_Vault_Platinum/
 │   ├── retry.py              # Retry decorator with exponential backoff
 │   └── rate_limiter.py       # Per-category rate limiter (persistent state)
 │
-├── prompts/                  # Stored prompt artifacts (processed task prompts)
-│
-├── specs/                    # Authoritative specification documents
-│   ├── architecture.md       # System architecture — canonical reference
-│   ├── platinum_design.md    # Component contracts, schemas, configuration
-│   ├── distributed_flow.md   # Step-by-step distributed workflow specification
-│   └── security_model.md     # Threat model, access controls, audit security
-│
 ├── logging/                  # Logging subsystem
 │   └── prompt_logger.py      # SHA-256 hash-chained, append-only JSONL prompt logger
+│
+├── specs/                    # Authoritative specification documents
+│   ├── architecture.md
+│   ├── platinum_design.md
+│   ├── distributed_flow.md
+│   └── security_model.md
+│
+├── prompts/                  # Stored prompt artifacts (processed task prompts)
 │
 ├── history/                  # Persistent audit record
 │   ├── prompt_log.json       # Append-only JSONL prompt + event log
 │   └── session_notes.md      # Human-readable session records
 │
 ├── Evidence/                 # Judge-facing output artifacts
-│   ├── JUDGE_PROOF.md              # Generated evidence pack (gitignored at runtime)
-│   ├── PLATINUM_ARCHITECTURE.md    # Full Mermaid architecture diagram + data-flow
-│   ├── PLATINUM_ARCHITECTURE.png   # Rendered architecture diagram (generate from .md)
-│   ├── demo_pipeline.gif           # Screen-captured live pipeline demo (placeholder)
-│   ├── MCP_PROOF.md                # MCP tool execution proof
-│   ├── HISTORY_PROOF.md            # Prompt history integrity proof
-│   └── RUN_CHECKLIST.md            # Quick-start command reference
+│   ├── JUDGE_PROOF.md        # Generated evidence pack
+│   ├── PLATINUM_ARCHITECTURE_V2.md / .png
+│   ├── MCP_PROOF.md
+│   ├── HISTORY_PROOF.md
+│   ├── RUN_CHECKLIST.md
+│   └── Oracle_Cloud_Proof/   # VM SSH + process screenshots
 │
 ├── vault/                    # Shared file-system state machine (inter-component bus)
-│   ├── Needs_Action/         # Input queue — Gmail watcher deposits .md files here
-│   │   └── email/            # Email items awaiting Cloud Agent processing
-│   ├── In_Progress/          # Claim-by-move staging (atomic rename = distributed lock)
-│   │   ├── cloud/            # Files currently held by Cloud Agent
-│   │   └── local/            # Files currently held by Local Executor
-│   ├── Pending_Approval/     # Task manifests awaiting executor pickup
-│   ├── Approved/             # Human-approved tasks (Phase 3 gate)
-│   ├── Done/                 # Completed task manifests with results
-│   ├── Retry_Queue/          # Failed Odoo tasks pending human review (no_auto_retry)
-│   ├── Deferred/             # Graceful degradation queues
-│   │   └── email/            # Deferred Gmail poll records
-│   ├── Logs/                 # execution_log.json, health_log.json, rate_limit_state.json
-│   └── Updates/              # cloud_updates.md — Cloud Agent status feed for Dashboard
+│   ├── Queue/                # Task queues: Needs_Action, Waiting_Approval, Done, Retry, …
+│   ├── Logs/                 # execution_log.json, health_log.json, heartbeat files
+│   └── Evidence/             # Runtime evidence output (VAULT_DIR)
 │
-├── watchdog.py               # Health Watchdog v1.0.0 — starts and monitors all three processes
-├── cloud_agent.py            # Root entry point — bootstraps and delegates to cloud_agent/agent.py
-├── local_executor.py         # Root entry point — bootstraps and delegates to local_executor/executor.py
-├── odoo_client.py            # Odoo XML-RPC client — partner + draft invoice creation (draft-only)
+├── Logs/                     # Top-level execution logs
+├── Briefings/                # CEO daily briefings (runtime output, gitignored)
+│
+├── watchdog.py               # Health Watchdog v1.0.0 — monitors all processes, auto-restart
+├── cloud_agent.py            # Root entry point — delegates to cloud_agent/agent.py
+├── local_executor.py         # Root entry point — delegates to local_executor/executor.py
+├── odoo_client.py            # Odoo XML-RPC client (draft-only)
 ├── Business_Goals.md         # CEO OKRs, revenue targets, escalation policy
-├── Briefings/                # CEO daily briefings (generated runtime output, gitignored)
-├── .gitignore                # Excludes secrets, runtime artifacts, and vault state files
+├── .gitignore                # Excludes secrets, runtime artifacts, vault state files
 └── README.md                 # This file
 ```
 
