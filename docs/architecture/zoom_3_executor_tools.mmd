@@ -1,0 +1,37 @@
+%%{init: {"theme": "dark", "flowchart": {"nodeSpacing": 60, "rankSpacing": 100, "curve": "basis"}, "themeVariables": {"fontSize": "22px", "fontFamily": "monospace"}}}%%
+flowchart TD
+
+    classDef vaultCls  fill:#d84315,stroke:#ff8a65,color:#fbe9e7,stroke-width:3px
+    classDef localCls  fill:#00695c,stroke:#80cbc4,color:#e0f2f1,stroke-width:3px
+    classDef toolCls   fill:#1565c0,stroke:#90caf9,color:#e3f2fd,stroke-width:2px
+    classDef svcCls    fill:#37474f,stroke:#90a4ae,color:#eceff1,stroke-width:2px
+
+    VA["✅ Approved/\nHuman-approved tasks"]
+
+    subgraph LOCAL["⚙️  LAYER 4 — LOCAL EXECUTION  (On-Premise)"]
+        LE["⚙️ Local Executor v1.3.0\nlocal_executor/executor.py\nClaim-by-move · Writes Dashboard.md\nSingle-writer rule enforced"]
+
+        subgraph MCP["🔧  MCP TOOL LAYER  —  mcp/router.py + registry.py"]
+            direction LR
+            EM["📧 Email MCP\nemail_mcp_stub.py\nSend / reply / forward"]
+            CM["📅 Calendar MCP\ncalendar_mcp_stub.py\nSchedule / update events"]
+            FM["📁 File MCP\nmcp_file_ops.py\nRead / write / list files"]
+            SM["📱 Social MCP\nsocial_mcp_stub.py\nPost to social channels"]
+            OD["🏢 Odoo Client\nodoo_client.py\nXML-RPC · draft-only\nno_auto_retry for payments"]
+        end
+
+        LE --> MCP
+    end
+
+    RL["⏱️ Rate Limiter\nutils/rate_limiter.py\nemail ≤ 10/hr\nsocial ≤ 20/hr · pay ≤ 3/day"]
+    RT["🔁 Retry Logic\nutils/retry.py\nExponential backoff\nDeferred queue fallback"]
+
+    VA    -->|"claim-by-move\nPath.rename()"| LE
+    EM & CM & FM & SM & OD -->|"result"| LE
+    RL    -.->|"gates"| LE
+    RT    -.->|"wraps"| LE
+
+    class VA vaultCls
+    class LE localCls
+    class EM,CM,FM,SM,OD toolCls
+    class RL,RT svcCls

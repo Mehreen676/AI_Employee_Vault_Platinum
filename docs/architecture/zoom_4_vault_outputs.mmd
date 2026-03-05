@@ -1,0 +1,44 @@
+%%{init: {"theme": "dark", "flowchart": {"nodeSpacing": 60, "rankSpacing": 100, "curve": "basis"}, "themeVariables": {"fontSize": "22px", "fontFamily": "monospace"}}}%%
+flowchart TD
+
+    classDef localCls  fill:#00695c,stroke:#80cbc4,color:#e0f2f1,stroke-width:3px
+    classDef vaultCls  fill:#d84315,stroke:#ff8a65,color:#fbe9e7,stroke-width:3px
+    classDef outCls    fill:#ad1457,stroke:#f48fb1,color:#fce4ec,stroke-width:3px
+    classDef svcCls    fill:#37474f,stroke:#90a4ae,color:#eceff1,stroke-width:2px
+
+    LE["⚙️ Local Executor v1.3.0"]
+
+    subgraph VAULT["🗄️  LAYER 5 — VAULT STATE MACHINE  (File-System Communication Bus)"]
+        direction LR
+        VD["✔️ Done/\nCompleted tasks\nwith execution results"]
+        VR["🔄 Retry_Queue/\nFailed Odoo tasks\nno_auto_retry flag set"]
+        VL["📊 Logs/\nexecution_log.json\nhealth_log.json\nrate_limit_state.json"]
+    end
+
+    subgraph OUTPUT["📤  LAYER 6 — OUTPUT & REPORTING"]
+        direction LR
+        EL["📋 Execution Logs\nvault/Logs/execution_log.json\nJSONL · one record per task"]
+        EP["🔍 Evidence Pack\nEvidence/JUDGE_PROOF.md\nGenerated on demand"]
+        CB["📊 CEO Briefing\nBriefings/YYYY-MM-DD.md\nDaily at 07:00 UTC"]
+        HL["💚 Health Logs\nvault/Logs/health_log.json\nPer-process alive/pid/restarts"]
+    end
+
+    subgraph SVCS["🛡️  LAYER 7 — SYSTEM SERVICES"]
+        direction LR
+        WD["🐕 Watchdog Supervisor\nwatchdog.py\nMonitors 3 processes\nAuto-restart on failure"]
+        PL["📝 Prompt Logger\nlogging/prompt_logger.py\nSHA-256 hash chain\nThread-safe Lock()"]
+    end
+
+    LE  -->|"success"| VD
+    LE  -->|"failure"| VR
+    LE  -->|"JSONL record"| EL
+    WD  -->|"writes"| HL
+    PL  -->|"SHA-256 chain"| EP
+    EL  -->|"read by"| EP
+    HL  -->|"read by"| EP
+    EL  -->|"read by"| CB
+
+    class LE localCls
+    class VD,VR,VL vaultCls
+    class EL,EP,CB,HL outCls
+    class WD,PL svcCls

@@ -1,0 +1,26 @@
+%%{init: {"theme": "dark", "flowchart": {"nodeSpacing": 60, "rankSpacing": 100, "curve": "basis"}, "themeVariables": {"fontSize": "22px", "fontFamily": "monospace"}}}%%
+flowchart TD
+
+    classDef vaultCls  fill:#d84315,stroke:#ff8a65,color:#fbe9e7,stroke-width:3px
+    classDef hitlCls   fill:#6a1b9a,stroke:#ce93d8,color:#f3e5f5,stroke-width:3px
+
+    VP["📬 Pending_Approval/\nCloud Agent writes here\nAwaiting human review"]
+
+    subgraph HITL["🧑‍⚖️  LAYER 3 — HUMAN-IN-THE-LOOP GATE"]
+        direction TB
+        HG["🚧 HITL Gate\nhitl.py\nInterrupts pipeline\nfor high-risk tasks\n(payments · social · bulk email)"]
+        HA["✅ Human Approval\napprove.py\nMoves Pending → Approved/\nOnly humans can act here"]
+        HR["❌ Rejection Handling\nTask archived to vault/Logs/\nwith reason recorded"]
+        HG --> HA
+        HG --> HR
+    end
+
+    VA["✅ Approved/\nHuman-approved tasks\nExecutor picks up here"]
+    VA2["⚡ Auto-Approved\nlow-risk tasks bypass\nHITL gate directly"]
+
+    VP -->|"HITL check\nif high-risk"| HG
+    HA -->|"moves to\nApproved/"| VA
+    VP -->|"auto-approve\nlow-risk tasks"| VA2
+
+    class VP,VA,VA2 vaultCls
+    class HG,HA,HR hitlCls
