@@ -1,0 +1,8 @@
+{
+  "id": "0cf6d438-0a93-49fb-937a-7a186c0ced43",
+  "task_type": "email",
+  "zone": "email",
+  "content": "[Claimed from Needs_Action] From: unknown | Subject: sim_20260305T083833Z_1c3fe9ab\n{\n  \"id\": \"1c3fe9ab-55fd-4290-9472-71f7fbafc636\",\n  \"task_type\": \"send_email\",\n  \"zone\": \"email\",\n  \"content\": \"Send conference attendance confirmation to event organizers\",\n  \"source\": \"company_simulation\",\n  \"created_at\": \"2026-03-05T08:38:33.795438+00:00\",\n  \"status\": \"pending\"\n}",
+  "created_at": "2026-03-05T08:39:06.497916Z",
+  "status": "pending"
+}

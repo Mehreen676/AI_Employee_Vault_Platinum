@@ -1,0 +1,8 @@
+{
+  "id": "c3a7afc1-e570-440c-bd45-aac1f765132d",
+  "task_type": "email",
+  "zone": "email",
+  "content": "[Claimed from Needs_Action] From: stub-sender-f8d4023f@gmail.com | Subject: [STUB] Synthetic email — 2026-03-05T08:23:38Z\nThis is a synthetic stub email generated because Gmail API credentials are not configured. Place credentials.json in the project root and install google-auth-oauthlib to enable live Gmail polling.",
+  "created_at": "2026-03-05T08:38:22.692805Z",
+  "status": "pending"
+}

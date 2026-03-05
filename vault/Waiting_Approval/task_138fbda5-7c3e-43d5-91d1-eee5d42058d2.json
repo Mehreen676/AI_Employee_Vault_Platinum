@@ -1,0 +1,8 @@
+{
+  "id": "138fbda5-7c3e-43d5-91d1-eee5d42058d2",
+  "task_type": "email",
+  "zone": "email",
+  "content": "[Claimed from Needs_Action] From: unknown | Subject: sim_20260305T083833Z_05061672\n{\n  \"id\": \"05061672-7da9-4375-a28d-f133400ef029\",\n  \"task_type\": \"social_post\",\n  \"zone\": \"social\",\n  \"content\": \"Respond to 15 customer comments on product announcement post\",\n  \"source\": \"company_simulation\",\n  \"created_at\": \"2026-03-05T08:38:33.997438+00:00\",\n  \"status\": \"pending\"\n}",
+  "created_at": "2026-03-05T08:38:56.423817Z",
+  "status": "pending"
+}

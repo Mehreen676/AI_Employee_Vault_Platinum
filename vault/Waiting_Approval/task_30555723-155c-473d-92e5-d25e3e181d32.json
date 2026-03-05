@@ -1,0 +1,8 @@
+{
+  "id": "30555723-155c-473d-92e5-d25e3e181d32",
+  "task_type": "email",
+  "zone": "email",
+  "content": "[Claimed from Needs_Action] From: unknown | Subject: sim_20260305T083833Z_1e219691\n{\n  \"id\": \"1e219691-3d47-4602-9c54-620b5c277bad\",\n  \"task_type\": \"email_processing\",\n  \"zone\": \"email\",\n  \"content\": \"Route urgent escalation from enterprise client to account manager\",\n  \"source\": \"company_simulation\",\n  \"created_at\": \"2026-03-05T08:38:33.890455+00:00\",\n  \"status\": \"pending\"\n}",
+  "created_at": "2026-03-05T08:39:11.541610Z",
+  "status": "pending"
+}

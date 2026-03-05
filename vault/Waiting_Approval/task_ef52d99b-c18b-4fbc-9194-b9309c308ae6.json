@@ -1,0 +1,8 @@
+{
+  "id": "ef52d99b-c18b-4fbc-9194-b9309c308ae6",
+  "task_type": "email",
+  "zone": "email",
+  "content": "Draft a follow-up email to Acme Corp regarding the Q1 pilot proposal agreed on 2026-02-20.",
+  "created_at": "2026-03-05T08:38:27.706879Z",
+  "status": "pending"
+}
