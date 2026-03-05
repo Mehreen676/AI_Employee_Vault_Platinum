@@ -14,6 +14,38 @@
 
 ---
 
+## 🌐 Live Deployment
+
+| Component | URL |
+|---|---|
+| **Frontend (Vercel)** | https://ai-employee-vault-platinum.vercel.app |
+| **Backend (Hugging Face Space)** | https://mehreenasghar5-ai-employee-vault-backend.hf.space |
+
+---
+
+## 🧪 How Judges Can Test
+
+1. Open the frontend dashboard: https://ai-employee-vault-platinum.vercel.app
+2. The system automatically connects to the backend hosted on Hugging Face.
+3. Judges can:
+   - View system overview (vault queue counts, real-time task state)
+   - Observe Cloud Agent heartbeat (live entries every few seconds)
+   - Generate Evidence Pack (cryptographic audit report)
+   - Inspect Watchdog Health (per-component online/offline status)
+   - Verify agent execution logs via the API Docs link
+
+---
+
+## ⚙️ Architecture
+
+| Layer | Technology |
+|---|---|
+| **Frontend** | Next.js dashboard deployed on Vercel |
+| **Backend** | FastAPI service deployed on Hugging Face Spaces |
+| **Agent System** | Cloud Agent + Watchdog monitoring + HITL approval queue |
+
+---
+
 ## ⚡ Quick Judge Run (3 Commands)
 
 For fast evaluation, judges can verify the **full distributed AI pipeline** in under a minute:
