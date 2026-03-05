@@ -5,28 +5,34 @@ flowchart TD
     classDef cloudCls  fill:#2e7d32,stroke:#81c784,color:#e8f5e9,stroke-width:3px
     classDef vaultCls  fill:#d84315,stroke:#ff8a65,color:#fbe9e7,stroke-width:3px
 
-    subgraph INPUT["📥  LAYER 1 — INPUT"]
+    subgraph INPUT["LAYER 1 - INPUT"]
         direction LR
-        GW["📧 Gmail Watcher\ngmail_watcher.py\nOAuth 2.0 + stub fallback"]
-        MD["📂 Manual Drop\nDrop .md / .json\ndirectly into vault"]
-        IB["📬 Inbox Watcher\nwatcher_inbox.py\nalternate input path"]
-        NA["🗂️ Needs_Action/\nvault/Needs_Action/email/\nstaging queue"]
+        GW["Gmail\ngmail_integration.py\nOAuth 2.0 + stub"]
+        SL["Slack Webhook\nPOST /slack/webhook\nEvents API"]
+        WA["WhatsApp\nPOST /whatsapp/webhook\nTwilio + TwiML"]
+        VC["Voice Interface\nvoice_interface.py\nmic + stdin fallback"]
+        MD["Manual Drop\nDrop .md / .json\ninto vault"]
+        IB["Inbox Watcher\nwatcher_inbox.py\nalternate path"]
+        NA["Needs_Action/\nvault/Needs_Action/\nstaging queue"]
     end
 
-    subgraph CLOUD["☁️  LAYER 2 — CLOUD AI  (HuggingFace Spaces — Always-On 24/7)"]
+    subgraph CLOUD["LAYER 2 - CLOUD AI  (HuggingFace Spaces - Always-On 24/7)"]
         direction LR
-        CA["🤖 Cloud Agent v1.4.0\ncloud_agent/agent.py\nClaim-by-move · Daemon mode\nHeartbeat every 5 seconds"]
-        TP["🧠 Task Planning\ntask_generator.py\nDecomposes intent\nSelects MCP tools"]
-        PG["✍️ Prompt Generation\nlogging/prompt_logger.py\nSHA-256 hash chain\nAppend-only JSONL"]
+        CA["Cloud Agent v1.4.0\ncloud_agent/agent.py\nClaim-by-move + Daemon mode\nHeartbeat every 5 seconds"]
+        TP["Task Planning\ntask_generator.py\nDecomposes intent\nSelects MCP tools"]
+        PG["Prompt Generation\nlogging/prompt_logger.py\nSHA-256 hash chain\nAppend-only JSONL"]
         CA --> TP --> PG
     end
 
-    GW  -->|"atomic rename\nvault/Needs_Action/email/"| NA
+    GW  -->|"atomic rename vault/Needs_Action/email/"| NA
+    SL  -->|"vault task Needs_Action/"| NA
+    WA  -->|"vault task Needs_Action/"| NA
+    VC  -->|"vault task Needs_Action/voice/"| NA
     MD  --> NA
     IB  --> NA
-    NA  -->|"claim-by-move\nPath.rename() — atomic OS lock"| CA
-    CA  -->|"task manifest\n→ Pending_Approval/"| PA["📬 Pending_Approval/\nawaiting human review"]
+    NA  -->|"claim-by-move Path.rename() atomic OS lock"| CA
+    CA  -->|"task manifest Pending_Approval/"| PA["Pending_Approval/\nawaiting human review"]
 
-    class GW,MD,IB,NA inputCls
+    class GW,SL,WA,VC,MD,IB,NA inputCls
     class CA,TP,PG cloudCls
     class PA vaultCls

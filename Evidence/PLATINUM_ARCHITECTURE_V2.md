@@ -41,10 +41,13 @@ flowchart TD
     %% ═══════════════════════════════════════════════════════════
     subgraph INPUT["📥  [ IN ]  INPUT LAYER"]
         direction LR
-        GW["Gmail Watcher\ngmail_watcher.py\nOAuth 2.0 + stub fallback"]
+        GW["Gmail Watcher\ngmail_integration.py\nOAuth 2.0 + stub fallback"]
         MD["Manual Drop\nDrop .md / .json\ndirectly into vault"]
         IB["Inbox Folder\nwatcher_inbox.py\nalternate input path"]
-        NA["Needs_Action/\nvault/Needs_Action/email/\nstaging queue"]
+        SL["Slack Webhook\nPOST /slack/webhook\nEvents API · intent routing"]
+        WA["WhatsApp Webhook\nPOST /whatsapp/webhook\nTwilio · TwiML response"]
+        VC["Voice Interface\nvoice_interface.py\nSpeechRecognition + stdin"]
+        NA["Needs_Action/\nvault/Needs_Action/\nstaging queue"]
     end
 
     %% ═══════════════════════════════════════════════════════════
@@ -105,8 +108,11 @@ flowchart TD
         direction LR
         EL["Execution Logs\nvault/Logs/execution_log.json\nJSONL · one record per task"]
         EP["Evidence Pack\nEvidence/JUDGE_PROOF.md\nGenerated on demand"]
-        CB["CEO Briefing\nBriefings/YYYY-MM-DD.md\nDaily 07:00 UTC"]
+        CB["CEO Report\nEvidence/CEO_REPORT.md\nPOST /reports/ceo"]
         HL["Health Logs\nvault/Logs/health_log.json\nPer-process alive/pid/restarts"]
+        MT["Dashboard Metrics\nGET /metrics\ntotal · success rate · latency"]
+        DL["AI Decision Log\nEvidence/AI_DECISION_LOG.md\ntool · risk · reasoning per task"]
+        HR["Health Report\nEvidence/SYSTEM_HEALTH_REPORT.md\nGET /monitoring/health"]
     end
 
     %% ═══════════════════════════════════════════════════════════
@@ -126,6 +132,9 @@ flowchart TD
     GW  -->|"atomic rename\nvault/Needs_Action/email/"| NA
     MD  --> NA
     IB  --> NA
+    SL  -->|"vault task\nNeeds_Action/"| NA
+    WA  -->|"vault task\nNeeds_Action/"| NA
+    VC  -->|"vault task\nNeeds_Action/voice/"| NA
 
     NA  -->|"claim-by-move\nPath.rename()"| CA
     CA  -->|"task manifest"| VP
@@ -154,15 +163,18 @@ flowchart TD
     EL  -->|"read by"| EP
     HL  -->|"read by"| EP
     EL  -->|"read by"| CB
+    EL  -->|"feeds"| MT
+    LE  -->|"decision record"| DL
+    WD  -->|"component status"| HR
 
     %% Apply styles
-    class GW,MD,IB,NA inputCls
+    class GW,MD,IB,SL,WA,VC,NA inputCls
     class CA,TP,PG cloudCls
     class HG,HA,HR hitlCls
     class LE localCls
     class EM,CM,FM,SM,OD toolCls
     class VP,VA,VD,VR,VL vaultCls
-    class EL,EP,CB,HL outCls
+    class EL,EP,CB,HL,MT,DL,HR outCls
     class WD,RL,RT,PL svcCls
 ```
 
@@ -172,12 +184,12 @@ flowchart TD
 
 | # | Layer | Badge | Colour | Key Components |
 |---|---|---|---|---|
-| 1 | Input | `[IN]` | Deep Blue | Gmail Watcher, Manual Drop, Inbox, Needs_Action Queue |
+| 1 | Input | `[IN]` | Deep Blue | Gmail, Slack Webhook, WhatsApp Webhook, Voice Interface, Manual Drop, Needs_Action Queue |
 | 2 | Cloud AI | `[AI]` | Deep Green | Cloud Agent v1.4.0, Task Planning, Prompt Generation |
 | 3 | Human-in-the-Loop | `[HUMAN]` | Deep Purple | HITL Gate, Human Approval, Rejection Handling |
 | 4 | Local Execution | `[RUN]` | Dark Teal | Local Executor v1.3.0, MCP Tool Layer (5 tools) |
 | 5 | Vault State Machine | `[VAULT]` | Deep Orange | Pending_Approval, Approved, Done, Retry_Queue, Logs |
-| 6 | Output & Reporting | `[OUT]` | Deep Magenta | Execution Logs, Evidence Pack, CEO Briefing, Health Logs |
+| 6 | Output & Reporting | `[OUT]` | Deep Magenta | Execution Logs, Evidence Pack, CEO Report, Health Logs, Dashboard Metrics, AI Decision Log, Health Report |
 | 7 | System Services | `[SVC]` | Dark Slate | Watchdog, Rate Limiter, Retry Logic, Prompt Logger |
 
 ---
@@ -215,7 +227,12 @@ file systems. The first process to succeed owns the file. No Redis or ZooKeeper 
 | Component | Reads | Writes | External Net | Dashboard.md |
 |---|---|---|---|---|
 | Cloud Agent | Needs_Action/, Done/ | Pending_Approval/, In_Progress/cloud/, Updates/ | HuggingFace (inbound) | `PermissionError` |
-| Gmail Watcher | — | Needs_Action/email/, Deferred/email/ | Gmail API | Never |
+| Gmail Integration | — | Needs_Action/email/, Deferred/email/ | Gmail API | Never |
+| Slack Integration | — | Needs_Action/ | Slack Events API (inbound) | Never |
+| WhatsApp Integration | — | Needs_Action/ | Twilio (inbound) | Never |
+| Voice Interface | — | Needs_Action/voice/ | — (local mic / stdin) | Never |
+| AI Decision Logger | — | Logs/ai_decisions.json, Evidence/AI_DECISION_LOG.md | — | Never |
+| Health Monitor | Logs/heartbeat JSON files | Evidence/SYSTEM_HEALTH_REPORT.md | — | Never |
 | Local Executor | Pending_Approval/, Approved/ | In_Progress/local/, Done/, Logs/, Retry_Queue/ | Odoo XML-RPC | **Only writer** |
 | Watchdog | — | Logs/health_log.json | — | Never |
 | Human Approver | Pending_Approval/ | Approved/ | — | — |
