@@ -94,9 +94,9 @@ This is not a demo. This is a production-class distributed system designed for o
 
 ## Platinum System Architecture (Overview)
 
-<img src="docs/architecture/platinum_system_architecture.png" width="1000" />
+Vertical stacked view — all 7 pipeline layers, top-to-bottom data flow.
 
-> Full diagram source + Mermaid version: [Evidence/PLATINUM_ARCHITECTURE_V2.md](Evidence/PLATINUM_ARCHITECTURE_V2.md)
+<img src="docs/architecture/platinum_overview.png" width="800" />
 
 The Platinum Tier is a **fully distributed, 7-layer AI pipeline**:
 
@@ -112,9 +112,19 @@ The Platinum Tier is a **fully distributed, 7-layer AI pipeline**:
 
 ---
 
-## Detailed System Flow (Zoomed, Readable)
+## Detailed System Flow (Mermaid)
 
-Each section below is a standalone high-resolution render of one pipeline stage.
+Full component-level flow with all connections, labels, and data paths.
+
+<img src="docs/architecture/platinum_system_architecture.png" width="1000" />
+
+> Mermaid source: [Evidence/PLATINUM_ARCHITECTURE_V2.md](Evidence/PLATINUM_ARCHITECTURE_V2.md)
+
+---
+
+## Zoomed Views (Readable)
+
+High-resolution per-layer views — all text readable at 100% zoom on GitHub.
 
 **Layer 1–2 · Input → Cloud AI**
 Gmail Watcher and Manual Drop feed tasks into Needs_Action/; Cloud Agent claims them via atomic rename and generates task manifests.
@@ -144,9 +154,7 @@ Completed tasks land in Done/; failures go to Retry_Queue/. Watchdog supervises 
 
 ---
 
-> Architecture source (Mermaid): [Evidence/PLATINUM_ARCHITECTURE_V2.md](Evidence/PLATINUM_ARCHITECTURE_V2.md)
->
-> Full architecture details with data-flow diagrams, claim-by-move protocol, and permission boundary matrix:
+> Full architecture details — data-flow diagrams, claim-by-move protocol, permission boundary matrix:
 > [Evidence/PLATINUM_ARCHITECTURE.md](Evidence/PLATINUM_ARCHITECTURE.md)
 
 ---
