@@ -257,102 +257,147 @@ Step 8  🔍  Evidence pack is generated
 ```
 AI_Employee_Vault_Platinum/
 │
-├── backend_api/              # FastAPI backend — deployed on HuggingFace Spaces
-│   ├── main.py               # FastAPI app — /status, /health, /queue/*, /evidence/* endpoints
-│   ├── agent/                # Cloud Agent daemon thread (queue processor + heartbeat)
-│   │   └── cloud_agent.py    # run_cloud_agent_loop() — Needs_Action → Waiting_Approval → Done
-│   ├── executor/             # Local Executor daemon thread
-│   │   └── local_executor.py # run_local_executor_loop() — heartbeat worker
-│   ├── watchers/             # Gmail Watcher daemon thread
-│   │   └── gmail_watcher.py  # run_gmail_watcher_loop() — heartbeat worker
-│   ├── run_agent.py          # CLI entry point for cloud agent loop
-│   ├── Dockerfile            # HuggingFace Spaces container definition
-│   └── requirements.txt      # Python dependencies
+├── backend_api/                    # FastAPI backend — deployed on HuggingFace Spaces
+│   ├── main.py                     # FastAPI app: /status /health /queue/* /evidence/* endpoints
+│   ├── agent/
+│   │   └── cloud_agent.py          # Cloud Agent daemon thread (queue processor + heartbeat)
+│   ├── executor/
+│   │   └── local_executor.py       # Local Executor daemon thread (heartbeat worker)
+│   ├── watchers/
+│   │   └── gmail_watcher.py        # Gmail Watcher daemon thread (heartbeat worker)
+│   ├── run_agent.py                # CLI entry point for the cloud agent loop
+│   ├── Dockerfile                  # HuggingFace Spaces container definition
+│   └── requirements.txt
 │
-├── frontend_dashboard/       # Next.js dashboard — deployed on Vercel
+├── frontend_dashboard/             # Next.js dashboard — deployed on Vercel
 │   ├── app/
-│   │   └── page.tsx          # Overview page — queues, heartbeat, watchdog, execution flow
-│   ├── components/           # UI components (Sidebar, etc.)
-│   ├── lib/                  # API client, types, utilities
-│   ├── vercel.json           # Vercel deployment config (sets NEXT_PUBLIC_BACKEND_URL)
-│   └── tailwind.config.js    # Futuristic vault theme
+│   │   ├── page.tsx                # Overview: queues, heartbeat, watchdog, execution flow
+│   │   ├── approvals/              # HITL approval UI
+│   │   ├── evidence/               # Evidence pack viewer
+│   │   └── logs/                   # Execution + prompt log viewer
+│   ├── components/
+│   │   └── Sidebar.tsx
+│   ├── lib/
+│   │   ├── api.ts                  # Backend API client
+│   │   └── types.ts                # TypeScript interfaces
+│   ├── vercel.json                 # Sets NEXT_PUBLIC_BACKEND_URL for Vercel builds
+│   └── tailwind.config.js          # Futuristic vault theme
 │
-├── hf_space_backend/         # Mirror of backend_api/ — separate git repo for HF Space push
+├── hf_space_backend/               # Mirror of backend_api/ — separate git repo for HF Space
 │
-├── cloud_agent/              # Original Cloud Agent package (local/VM mode)
-│   ├── agent.py              # CloudAgent v1.4.0 — task generation, claim-by-move, daemon
-│   └── task_generator.py     # Standalone task generation utility
+├── cloud_agent/                    # Cloud Agent package (local / Oracle VM mode)
+│   ├── agent.py                    # CloudAgent v1.4.0: claim-by-move, daemon, heartbeat
+│   └── task_generator.py           # Standalone task generation utility
 │
-├── local_executor/           # Local Executor package (local/VM mode)
-│   ├── executor.py           # LocalExecutor v1.3.0 — task processing, Dashboard.md writer
-│   └── watcher.py            # Polling watcher entrypoint
+├── local_executor/                 # Local Executor package (local / Oracle VM mode)
+│   ├── executor.py                 # LocalExecutor v1.3.0: task processing, Dashboard.md
+│   └── watcher.py                  # Polling watcher entrypoint
 │
-├── watchers/                 # Input watchers — feed vault/Needs_Action/
-│   ├── gmail_watcher.py      # Platinum Gmail watcher (vault/Needs_Action/email/, stub fallback)
-│   └── gmail_inbox_watcher.py# Gold Tier Gmail watcher (Inbox/ directory)
+├── watchers/                       # Input watchers — feed vault/Needs_Action/
+│   ├── gmail_watcher.py            # Platinum Gmail watcher (OAuth + stub fallback)
+│   └── gmail_inbox_watcher.py      # Gold Tier Gmail watcher (Inbox/ directory mode)
 │
-├── mcp/                      # MCP tool stubs — email, calendar, social, Odoo, browser
-│   ├── email_mcp_stub.py     # Email send/draft stub
-│   ├── calendar_mcp_stub.py  # Calendar scheduling stub
-│   ├── odoo_mcp_stub.py      # Odoo partner/invoice stub
-│   ├── social_mcp_stub.py    # Social media post stub
-│   ├── router.py             # Tool router — dispatches tasks to the right MCP stub
-│   └── registry.py           # Tool registry — maps task types to MCP handlers
+├── mcp/                            # MCP tool stubs
+│   ├── email_mcp_stub.py
+│   ├── calendar_mcp_stub.py
+│   ├── odoo_mcp_stub.py
+│   ├── social_mcp_stub.py
+│   ├── browser_mcp_stub.py
+│   ├── gmail_mcp_server.py
+│   ├── playwright_browser_server.py
+│   ├── router.py                   # Dispatches tasks to the right MCP stub
+│   └── registry.py                 # Maps task types to MCP handlers
 │
-├── scripts/                  # Operational scripts
-│   ├── systemd/              # Production systemd unit files (Ubuntu 22.04)
-│   ├── generate_briefing.py  # CEO daily briefing automation
-│   ├── cleanup_old_logs.py   # 90-day audit log retention
-│   ├── generate_evidence_pack.py  # Writes Evidence/JUDGE_PROOF.md
-│   └── run_daily_audit.py    # Daily audit runner
+├── scripts/                        # Operational scripts
+│   ├── systemd/                    # Production systemd unit files (Ubuntu 22.04)
+│   │   ├── ai-vault-cloud-agent.service
+│   │   └── ai-vault-local-executor.service
+│   ├── generate_evidence_pack.py   # Writes Evidence/JUDGE_PROOF.md
+│   ├── generate_briefing.py        # CEO daily briefing automation
+│   ├── cleanup_old_logs.py         # 90-day audit log retention
+│   ├── run_daily_audit.py          # Daily audit runner
+│   └── run_gmail_watcher.bat       # Windows quick-start for Gmail Watcher
 │
-├── tools/                    # Internal utility tools
+├── tools/                          # Internal utility / development tools
 │   ├── generate_architecture_diagram.py
+│   ├── generate_architecture_v2.py
+│   ├── generate_evidence_pack.py
 │   ├── load_demo_task.py
-│   └── mcp_health_report.py
+│   ├── mcp_health_report.py
+│   └── verify_history_chain.py
 │
-├── utils/                    # Shared helpers
-│   ├── retry.py              # Retry decorator with exponential backoff
-│   └── rate_limiter.py       # Per-category rate limiter (persistent state)
+├── utils/                          # Shared helpers
+│   ├── rate_limiter.py             # Per-category rate limiter (persistent JSON state)
+│   └── retry.py                    # Retry decorator with exponential backoff
 │
-├── logging/                  # Logging subsystem
-│   └── prompt_logger.py      # SHA-256 hash-chained, append-only JSONL prompt logger
+├── logging/                        # Logging subsystem
+│   └── prompt_logger.py            # SHA-256 hash-chained append-only JSONL prompt logger
 │
-├── specs/                    # Authoritative specification documents
+├── specs/                          # Authoritative specification documents
 │   ├── architecture.md
 │   ├── platinum_design.md
 │   ├── distributed_flow.md
 │   └── security_model.md
 │
-├── prompts/                  # Stored prompt artifacts (processed task prompts)
+├── prompts/                        # Stored prompt artifacts (processed task outputs)
 │
-├── history/                  # Persistent audit record
-│   ├── prompt_log.json       # Append-only JSONL prompt + event log
-│   └── session_notes.md      # Human-readable session records
+├── history/                        # Persistent audit record
+│   ├── prompt_log.json             # Append-only JSONL prompt + event log
+│   └── session_notes.md
 │
-├── Evidence/                 # Judge-facing output artifacts
-│   ├── JUDGE_PROOF.md        # Generated evidence pack
-│   ├── PLATINUM_ARCHITECTURE_V2.md / .png
+├── Evidence/                       # Judge-facing output artifacts
+│   ├── JUDGE_PROOF.md              # Generated evidence pack (runtime, gitignored)
+│   ├── PLATINUM_ARCHITECTURE_V2.md
+│   ├── PLATINUM_ARCHITECTURE_V2.png
 │   ├── MCP_PROOF.md
 │   ├── HISTORY_PROOF.md
 │   ├── RUN_CHECKLIST.md
-│   └── Oracle_Cloud_Proof/   # VM SSH + process screenshots
+│   └── Oracle_Cloud_Proof/         # VM SSH + running-process screenshots (7 images)
 │
-├── vault/                    # Shared file-system state machine (inter-component bus)
-│   ├── Queue/                # Task queues: Needs_Action, Waiting_Approval, Done, Retry, …
-│   ├── Logs/                 # execution_log.json, health_log.json, heartbeat files
-│   └── Evidence/             # Runtime evidence output (VAULT_DIR)
+├── vault/                          # File-system state machine (inter-component message bus)
+│   ├── Queue/                      # Task queues: Needs_Action, Waiting_Approval, Pending_Approval,
+│   │                               #   Approved, Done, Retry, Rejected (gitignored at runtime)
+│   ├── Logs/                       # execution_log.json, health_log.json, heartbeat JSON files
+│   ├── Approved/
+│   ├── Deferred/
+│   ├── Done/
+│   ├── Pending_Approval/
+│   ├── Retry_Queue/
+│   └── Waiting_Approval/
 │
-├── Logs/                     # Top-level execution logs
-├── Briefings/                # CEO daily briefings (runtime output, gitignored)
+├── Logs/                           # Top-level execution log snapshots
+├── Briefings/                      # CEO daily briefings (runtime output, gitignored)
 │
-├── watchdog.py               # Health Watchdog v1.0.0 — monitors all processes, auto-restart
-├── cloud_agent.py            # Root entry point — delegates to cloud_agent/agent.py
-├── local_executor.py         # Root entry point — delegates to local_executor/executor.py
-├── odoo_client.py            # Odoo XML-RPC client (draft-only)
-├── Business_Goals.md         # CEO OKRs, revenue targets, escalation policy
-├── .gitignore                # Excludes secrets, runtime artifacts, vault state files
-└── README.md                 # This file
+│  ── Root Python files ──
+├── watchdog.py                     # Health Watchdog v1.0.0: monitors processes, auto-restart
+├── cloud_agent.py                  # Root entry point → cloud_agent/agent.py
+├── local_executor.py               # Root entry point → local_executor/executor.py
+├── agent.py                        # Standalone agent entrypoint
+├── gmail_watcher.py                # Root-level Gmail watcher entrypoint
+├── approve.py                      # CLI HITL approval helper
+├── audit_logger.py                 # Audit event logger
+├── hitl.py                         # Human-in-the-loop approval workflow
+├── domain_router.py                # Routes tasks by domain/type
+├── base_watcher.py                 # Abstract base class for vault watchers
+├── inbox_watcher.py                # Inbox directory watcher
+├── watcher_inbox.py                # Inbox watcher variant
+├── gold_agent.py                   # Gold Tier agent entrypoint
+├── odoo_client.py                  # Odoo XML-RPC client (draft-only, no live writes)
+├── meta_client.py                  # Meta (Facebook/Instagram) API client stub
+├── x_client.py                     # X (Twitter) API client stub
+├── mcp_server.py                   # Root MCP server entrypoint
+├── mcp_email_ops.py                # Email MCP operations
+├── mcp_calendar_ops.py             # Calendar MCP operations
+├── mcp_file_ops.py                 # File MCP operations
+├── mcp_audit_ops.py                # Audit MCP operations
+├── mcp_accounting_xero.py          # Xero accounting MCP stub
+├── mcp_social_facebook.py          # Facebook social MCP stub
+├── mcp_social_instagram.py         # Instagram social MCP stub
+├── mcp_social_twitter.py           # Twitter social MCP stub
+├── Business_Goals.md               # CEO OKRs, revenue targets, escalation policy
+├── requirements.txt                # Root Python dependencies
+├── .gitignore                      # Excludes secrets, runtime artifacts, vault state
+└── README.md                       # This file
 ```
 
 ---
