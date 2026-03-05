@@ -289,25 +289,29 @@ export default function OverviewPage() {
           <div className="vault-card p-5">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
               {(['cloud_agent', 'gmail_watcher', 'local_executor'] as const).map((key) => {
-                // 1st choice: status.watchdog[key] (backend-computed, 30 s window)
-                const wd   = status?.watchdog?.[key];
-                // 2nd choice (cloud_agent only): last_heartbeat freshness vs status.time
-                const heartbeatAlive =
+                // 1st choice: status.watchdog[key] (backend-computed from agent_heartbeat.json)
+                const wd = status?.watchdog?.[key];
+                // 2nd choice (cloud_agent only): last_heartbeat freshness vs status.time.
+                // Acts as safety-net even when wd is present but shows offline — e.g.
+                // if the agent loop was briefly delayed but health pings kept the heartbeat fresh.
+                const heartbeatFresh =
                   key === 'cloud_agent' &&
-                  !wd &&
                   !!status?.last_heartbeat &&
                   !!status?.time &&
-                  (new Date(status.time).getTime() - new Date(status.last_heartbeat).getTime()) < 15_000;
+                  (new Date(status.time).getTime() - new Date(status.last_heartbeat).getTime()) < 35_000;
                 // 3rd choice: legacy last_health process entry
                 const proc = status?.last_health?.[key as keyof typeof status.last_health] as
                   | { alive?: boolean; pid?: number; restarts?: number }
                   | undefined;
-                const alive = wd ? wd.status === 'online' : (heartbeatAlive || !!proc?.alive);
-                const sub = wd
-                  ? (alive ? ts(wd.last_seen ?? undefined) : 'offline')
-                  : heartbeatAlive
-                    ? ts(status?.last_heartbeat ?? undefined)
-                    : (alive ? `PID ${proc?.pid ?? '?'}` : 'offline');
+                const alive = wd
+                  ? (wd.status === 'online' || heartbeatFresh)
+                  : (heartbeatFresh || !!proc?.alive);
+                const sub = (() => {
+                  if (wd?.status === 'online') return ts(wd.last_seen ?? undefined);
+                  if (heartbeatFresh)          return ts(status?.last_heartbeat ?? undefined);
+                  if (alive && proc?.pid)      return `PID ${proc.pid}`;
+                  return 'offline';
+                })();
                 return (
                   <div key={key} className="flex items-center gap-2.5">
                     <span className={`w-2 h-2 rounded-full shrink-0 ${alive ? 'bg-vault-green' : 'bg-vault-red'}`} />
@@ -317,7 +321,7 @@ export default function OverviewPage() {
                       </p>
                       <p className="text-vault-dim font-mono">
                         {sub}
-                        {!wd && !heartbeatAlive && (proc?.restarts ?? 0) > 0 && ` · ${proc?.restarts}↺`}
+                        {!wd && !heartbeatFresh && (proc?.restarts ?? 0) > 0 && ` · ${proc?.restarts}↺`}
                       </p>
                     </div>
                   </div>

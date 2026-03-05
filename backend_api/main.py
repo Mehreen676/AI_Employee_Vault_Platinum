@@ -367,6 +367,20 @@ def health():
         "source":    "health_check",
         "message":   "heartbeat",
     })
+    # Refresh agent_heartbeat.json on every health ping so _compute_watchdog()
+    # always returns cloud_agent=online while the backend is alive.
+    try:
+        (LOG_DIR / "agent_heartbeat.json").write_text(
+            json.dumps({
+                "agent":     "cloud_agent",
+                "timestamp": now,
+                "status":    "running",
+                "source":    "health_check",
+            }),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
     return {"status": "ok", "time": now, "version": VERSION}
 
 
