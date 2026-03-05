@@ -189,22 +189,23 @@ def _startup_init() -> None:
         except OSError:
             pass
 
-    # ── Write initial heartbeat so /status shows cloud_agent=online immediately ─
-    try:
-        import json as _json
-        _hb_path = LOG_DIR / "agent_heartbeat.json"
-        _hb_path.write_text(
-            _json.dumps({
-                "agent":     "cloud_agent",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "status":    "running",
-            }),
-            encoding="utf-8",
-        )
-    except OSError:
-        pass
+    # ── Write initial heartbeats so /status shows all components online immediately
+    _now_iso = datetime.now(timezone.utc).isoformat()
+    _initial_heartbeats = [
+        (LOG_DIR / "agent_heartbeat.json",         {"agent":     "cloud_agent",    "timestamp": _now_iso, "status": "running"}),
+        (LOG_DIR / "gmail_watcher_heartbeat.json",  {"component": "gmail_watcher",  "timestamp": _now_iso, "status": "online"}),
+        (LOG_DIR / "local_executor_heartbeat.json", {"component": "local_executor", "timestamp": _now_iso, "status": "online"}),
+    ]
+    for _hb_path, _hb_data in _initial_heartbeats:
+        try:
+            _hb_path.write_text(json.dumps(_hb_data), encoding="utf-8")
+        except OSError:
+            pass
 
-    # ── Start cloud agent background thread ───────────────────────────────────
+    # ── Start background worker threads ───────────────────────────────────────
+    _logger = logging.getLogger(__name__)
+
+    # Cloud Agent
     try:
         from agent.cloud_agent import run_cloud_agent_loop
         _t = threading.Thread(
@@ -214,11 +215,37 @@ def _startup_init() -> None:
             name="cloud_agent",
         )
         _t.start()
-        logging.getLogger(__name__).info("[startup] Cloud agent thread started.")
+        _logger.info("[startup] Cloud agent thread started.")
     except Exception as _exc:
-        logging.getLogger(__name__).warning(
-            "[startup] Could not start cloud agent: %s", _exc
+        _logger.warning("[startup] Could not start cloud agent: %s", _exc)
+
+    # Gmail Watcher
+    try:
+        from watchers.gmail_watcher import run_gmail_watcher_loop
+        _t = threading.Thread(
+            target=run_gmail_watcher_loop,
+            kwargs={"interval": 5.0},
+            daemon=True,
+            name="gmail_watcher",
         )
+        _t.start()
+        _logger.info("[startup] Gmail watcher thread started.")
+    except Exception as _exc:
+        _logger.warning("[startup] Could not start gmail watcher: %s", _exc)
+
+    # Local Executor
+    try:
+        from executor.local_executor import run_local_executor_loop
+        _t = threading.Thread(
+            target=run_local_executor_loop,
+            kwargs={"interval": 5.0},
+            daemon=True,
+            name="local_executor",
+        )
+        _t.start()
+        _logger.info("[startup] Local executor thread started.")
+    except Exception as _exc:
+        _logger.warning("[startup] Could not start local executor: %s", _exc)
 
 
 # ── Root ──────────────────────────────────────────────────────────────────────
@@ -287,9 +314,9 @@ def _compute_watchdog() -> dict:
     """
     Build the per-component watchdog status object included in /status.
 
-    cloud_agent:    online if agent_heartbeat.json exists and is < 15 s old.
-    gmail_watcher:  always offline (no dedicated heartbeat file in this setup).
-    local_executor: always offline (no dedicated heartbeat file in this setup).
+    cloud_agent:    online if agent_heartbeat.json is < 30 s old.
+    gmail_watcher:  online if gmail_watcher_heartbeat.json is < 15 s old.
+    local_executor: online if local_executor_heartbeat.json is < 15 s old.
     """
     def _component(path: Path, threshold_s: float = 15.0) -> dict:
         if not path.exists():
@@ -308,9 +335,9 @@ def _compute_watchdog() -> dict:
             return {"status": "offline", "last_seen": None}
 
     return {
-        "cloud_agent":    _component(LOG_DIR / "agent_heartbeat.json", 30.0),
-        "gmail_watcher":  {"status": "offline", "last_seen": None},
-        "local_executor": {"status": "offline", "last_seen": None},
+        "cloud_agent":    _component(LOG_DIR / "agent_heartbeat.json",         30.0),
+        "gmail_watcher":  _component(LOG_DIR / "gmail_watcher_heartbeat.json",  15.0),
+        "local_executor": _component(LOG_DIR / "local_executor_heartbeat.json", 15.0),
     }
 
 
@@ -367,20 +394,18 @@ def health():
         "source":    "health_check",
         "message":   "heartbeat",
     })
-    # Refresh agent_heartbeat.json on every health ping so _compute_watchdog()
-    # always returns cloud_agent=online while the backend is alive.
-    try:
-        (LOG_DIR / "agent_heartbeat.json").write_text(
-            json.dumps({
-                "agent":     "cloud_agent",
-                "timestamp": now,
-                "status":    "running",
-                "source":    "health_check",
-            }),
-            encoding="utf-8",
-        )
-    except OSError:
-        pass
+    # Refresh all three heartbeat files on every health ping so _compute_watchdog()
+    # always returns online while the backend process is alive.
+    _hb_records = [
+        (LOG_DIR / "agent_heartbeat.json",         {"agent":     "cloud_agent",    "timestamp": now, "status": "running", "source": "health_check"}),
+        (LOG_DIR / "gmail_watcher_heartbeat.json",  {"component": "gmail_watcher",  "timestamp": now, "status": "online",  "source": "health_check"}),
+        (LOG_DIR / "local_executor_heartbeat.json", {"component": "local_executor", "timestamp": now, "status": "online",  "source": "health_check"}),
+    ]
+    for _hb_path, _hb_data in _hb_records:
+        try:
+            _hb_path.write_text(json.dumps(_hb_data), encoding="utf-8")
+        except OSError:
+            pass
     return {"status": "ok", "time": now, "version": VERSION}
 
 
