@@ -634,9 +634,9 @@ The following endpoints were added to `backend_api/main.py` and `hf_space_backen
 
 ## Demo Video
 
-A 1-minute walkthrough demonstrating the full Platinum Tier pipeline:
+A 5-minute 27-second walkthrough demonstrating the Platinum Tier architecture, cloud deployment, watchdog health, vault queues, evidence artifacts, and live dashboard proof:
 
-**Demo Video:** https://your-demo-link
+**Demo Video:** https://youtu.be/VQxRigWQgXU?si=LzZLfycpHYI-YAe1
 
 The video covers:
 
@@ -644,9 +644,7 @@ The video covers:
 2. **Watchdog system startup** — `python watchdog.py --start-all --interval 10` launches all three processes with health monitoring
 3. **Task lifecycle through the vault** — watch files move atomically through `Needs_Action/ → In_Progress/cloud/ → Pending_Approval/ → Approved/ → In_Progress/local/ → Done/`
 4. **Evidence pack generation** — `python scripts/generate_evidence_pack.py --n 20` produces `Evidence/JUDGE_PROOF.md` with the full audit trail
-5. **systemd proof** — `systemctl status` output showing `Active: active (running)` as kernel-level process supervision
-
-> Replace the placeholder URL above with your recorded Loom / YouTube / Google Drive link before submission.
+5. **Live dashboard proof** — frontend metrics panel, cloud agent heartbeat, and system health report shown in real time
 
 ---
 
